@@ -103,24 +103,50 @@ class Box extends THREE.Mesh {
 
 
 class World extends Box {
-    duplicate(player) {
+    constructor(options) {
+        super(options);
+        this.isDuplicated = false;
+    }
 
-        console.log(this.position.z, player.position.z);
+    update() {
+        // World segments don't need gravity or velocity updates
+        this.updateBoundaries();
+    }
 
-       // player has 80% position z of world create a new world
-        if (this.position.z > player.position.z * 0.8) {
+    duplicate(player, worlds) {
+        // Trigger duplication when player reaches 50% of the current ground segment
+        const playerRelativeZ = player.position.z - (this.position.z - this.depth / 2);
+        const shouldDuplicate = playerRelativeZ > this.depth * 0.5;
+/*
+        if (shouldDuplicate && !this.isDuplicated) {
+            this.isDuplicated = false;
+
+            // Limit to maximum 3 world segments
+            if (worlds.length >= 3) {
+                // Remove the oldest segment (furthest behind)
+                const oldestWorld = worlds[0];
+                scene.remove(oldestWorld);
+                worlds.shift();
+                console.log('Oldest world removed. Remaining:', worlds.length);
+            }
             const world = new World({
                 width: this.width,
                 height: this.height,
                 depth: this.depth,
                 color: this.color,
-                position: {x: this.position.x, y: this.position.y, z: this.position.z},
+                position: {
+                    x: this.position.x,
+                    y: this.position.y,
+                    z: this.position.z - this.depth // Place new world behind current one
+                },
                 velocity: {x: this.velocity.x, y: this.velocity.y, z: this.velocity.z},
-            })
-            scene.add(world);
+            });
+            //scene.add(world);
+            //worlds.push(world);
+            // console.log('New world created at z:', world.position.z, '| Total worlds:', worlds.length);
         }
 
-
+ */
     }
 }
 
@@ -153,11 +179,11 @@ const ground = new World({
     depth: 10,
     color: '#06232c',
     position: {x: 0, y: -2, z: -4},
-    velocity: {x: 0, y: 0, z: 0.01},
+    velocity: {x: 0, y: 0, z: 0},
 })
 scene.add(ground);
 
-
+const worlds = [ground];
 const enemies = []
 
 // light
@@ -263,19 +289,35 @@ let frames = 0;
 let spawnRate = 0;
 function animate() {
     const animationId = requestAnimationFrame(animate)
-    controls.enabled = true;
+    controls.enabled = false; // Disable OrbitControls during gameplay
 
     updatePlayerLane()
 
-    cube.update(ground);
+    // Find the ground segment the player is currently on
+    let currentGround = worlds[0];
+    for (let world of worlds) {
+        if (cube.position.z >= world.position.z - world.depth / 2 &&
+            cube.position.z <= world.position.z + world.depth / 2) {
+            currentGround = world;
+            break;
+        }
+    }
 
-    ground.update();
-    ground.duplicate(cube);
-    //ground.duplicate(cube);
+    cube.update(currentGround);
+
+    // Camera follows player
+    camera.position.x = cube.position.x + 0.2;
+    camera.position.z = cube.position.z + 3;
+
+    // Update all world segments
+    worlds.forEach(world => {
+        world.update();
+        world.duplicate(cube, worlds);
+    });
 
 
     enemies.forEach(enemy => {
-        enemy.update(ground);
+        enemy.update(currentGround);
         if (boxCollision({
             box1: cube,
             box2: enemy,
