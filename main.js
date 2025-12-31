@@ -113,13 +113,17 @@ class World extends Box {
         this.updateBoundaries();
     }
 
-    duplicate(player, worlds) {
-        // Trigger duplication when player reaches 50% of the current ground segment
-        const playerRelativeZ = player.position.z - (this.position.z - this.depth / 2);
-        const shouldDuplicate = playerRelativeZ > this.depth * 0.5;
-/*
+    duplicate(player, worlds, createWorldSegment) {
+        // Calculate how far the player has progressed through this segment
+        const segmentStart = this.position.z + this.depth / 2; // Front of segment
+        const segmentEnd = this.position.z - this.depth / 2;   // Back of segment
+        const playerProgress = (segmentStart - player.position.z) / this.depth;
+
+        // Trigger duplication early (at 30% progress) to prevent player from falling
+        const shouldDuplicate = playerProgress > 0.3;
+
         if (shouldDuplicate && !this.isDuplicated) {
-            this.isDuplicated = false;
+            this.isDuplicated = true;
 
             // Limit to maximum 3 world segments
             if (worlds.length >= 3) {
@@ -129,24 +133,13 @@ class World extends Box {
                 worlds.shift();
                 console.log('Oldest world removed. Remaining:', worlds.length);
             }
-            const world = new World({
-                width: this.width,
-                height: this.height,
-                depth: this.depth,
-                color: this.color,
-                position: {
-                    x: this.position.x,
-                    y: this.position.y,
-                    z: this.position.z - this.depth // Place new world behind current one
-                },
-                velocity: {x: this.velocity.x, y: this.velocity.y, z: this.velocity.z},
-            });
-            //scene.add(world);
-            //worlds.push(world);
-            // console.log('New world created at z:', world.position.z, '| Total worlds:', worlds.length);
-        }
 
- */
+            // Create new segment behind the current one
+            const newZPosition = this.position.z - this.depth;
+            createWorldSegment(newZPosition);
+
+            console.log('New world created at z:', newZPosition, '| Player at:', player.position.z.toFixed(2), '| Progress:', (playerProgress * 100).toFixed(1) + '%');
+        }
     }
 }
 
@@ -169,22 +162,38 @@ const cube = new Player({
     height: 1,
     depth: 1,
     color: '#627257',
-    velocity: {x: 0, y: -0.05, z: 0},
+    velocity: {x: 0, y: -0.05, z: -0.05},
+    position: {x: 0, y: 0, z: 0},
 });
 scene.add(cube);
 
-const ground = new World({
+// World configuration
+const worldConfig = {
     width: 3,
     height: 1,
     depth: 10,
     color: '#06232c',
-    position: {x: 0, y: -2, z: -4},
-    velocity: {x: 0, y: 0, z: 0},
-})
-scene.add(ground);
+};
 
-const worlds = [ground];
-const enemies = []
+const worlds = [];
+const enemies = [];
+
+// Function to create a new world segment
+function createWorldSegment(zPosition) {
+    const world = new World({
+        ...worldConfig,
+        position: {x: 0, y: -2, z: zPosition},
+        velocity: {x: 0, y: 0, z: 0},
+    });
+    scene.add(world);
+    worlds.push(world);
+    return world;
+}
+
+// Initialize first world segments (start ahead of player)
+createWorldSegment(worldConfig.depth);
+createWorldSegment(0);
+createWorldSegment(-worldConfig.depth);
 
 // light
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -312,7 +321,7 @@ function animate() {
     // Update all world segments
     worlds.forEach(world => {
         world.update();
-        world.duplicate(cube, worlds);
+        world.duplicate(cube, worlds, createWorldSegment);
     });
 
 
