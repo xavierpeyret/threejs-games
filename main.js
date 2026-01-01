@@ -207,6 +207,17 @@ const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
 const light = new THREE.DirectionalLight(0xffffff, 1);
 light.position.set(-1, 0.5, 0.5);
 light.castShadow = true;
+
+// Configure shadow camera to cover a larger area
+light.shadow.camera.left = -10;
+light.shadow.camera.right = 10;
+light.shadow.camera.top = 10;
+light.shadow.camera.bottom = -10;
+light.shadow.camera.near = 0.1;
+light.shadow.camera.far = 50;
+light.shadow.mapSize.width = 2048;  // Improve shadow quality
+light.shadow.mapSize.height = 2048;
+
 scene.add(light);
 
 // scene.fog = new THREE.FogExp2( '#041115', 0.1 );
