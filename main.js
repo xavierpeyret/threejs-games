@@ -1,9 +1,7 @@
-import './style.scss';
-
 import * as THREE from 'three';
 
 // ========================================
-// CONSTANTES DE JEU
+// CONSTANTES
 // ========================================
 const GRAVITY = 20;
 const JUMP_FORCE = 12;
@@ -11,12 +9,37 @@ const MOVE_SPEED = 8;
 const PLAYER_SIZE = 1;
 
 // ========================================
+// DONNÉES DES NIVEAUX
+// ========================================
+const LEVELS = {
+    tutorial: {
+        platforms: [
+            { x: 0,  y: 0, z: 0, w: 8, h: 1, d: 8 },
+            { x: 10, y: 0, z: 0, w: 6, h: 1, d: 6 },
+            { x: 18, y: 2, z: 0, w: 4, h: 1, d: 4 },
+            { x: 24, y: 4, z: 0, w: 6, h: 1, d: 6 }
+        ],
+        collectibles: [
+            { x: 10, y: 2, z: 0 },
+            { x: 18, y: 4, z: 0 },
+            { x: 24, y: 6, z: 0 }
+        ],
+        playerStart: { x: 0, y: 2, z: 0 },
+        goal: { x: 24, y: 6, z: 0 }
+    }
+};
+
+// ========================================
 // VARIABLES GLOBALES
 // ========================================
 let scene, camera, renderer;
-let player, platforms = [];
+let player;
+let platforms = [];
+let collectibles = [];
 let keys = {};
 let clock;
+let score = 0;
+let currentLevel = 'tutorial';
 
 // ========================================
 // INITIALISATION
@@ -24,9 +47,11 @@ let clock;
 function init() {
     setupThreeJS();
     createPlayer();
-    createLevel();
     setupLights();
     setupControls();
+
+    loadLevel('tutorial');  // ← Charger le niveau initial
+
     gameLoop();
 }
 
@@ -34,11 +59,9 @@ function init() {
 // SETUP THREE.JS
 // ========================================
 function setupThreeJS() {
-    // Créer la scène
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87ceeb);
 
-    // Créer la caméra
     camera = new THREE.PerspectiveCamera(
         75,
         window.innerWidth / window.innerHeight,
@@ -47,16 +70,13 @@ function setupThreeJS() {
     );
     camera.position.set(0, 5, 10);
 
-    // Créer le renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // Clock pour delta time
     clock = new THREE.Clock();
 
-    // Responsive
     window.addEventListener('resize', onWindowResize);
 }
 
@@ -75,7 +95,6 @@ function createPlayer() {
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = true;
-    mesh.position.set(0, 5, 0);
     scene.add(mesh);
 
     player = {
@@ -87,46 +106,111 @@ function createPlayer() {
 }
 
 // ========================================
-// CRÉER LE NIVEAU
+// FACTORIES (Création d'objets)
 // ========================================
-function createLevel() {
-    const platformMaterial = new THREE.MeshStandardMaterial({ color: 0x6bcfff });
-
-    // Sol principal
-    const groundGeometry = new THREE.BoxGeometry(20, 1, 20);
-    const ground = new THREE.Mesh(groundGeometry, platformMaterial);
-    ground.position.y = -0.5;
-    ground.receiveShadow = true;
-    scene.add(ground);
-    platforms.push(ground);
-
-    // Plateformes additionnelles
-    createPlatform(5, 2, 0, 4, 1, 4);
-    createPlatform(10, 4, 0, 3, 1, 3);
-    createPlatform(-5, 3, 0, 3, 1, 3);
-}
-
 function createPlatform(x, y, z, w, h, d) {
     const geometry = new THREE.BoxGeometry(w, h, d);
-    const material = new THREE.MeshStandardMaterial({ color: 0x00ff88 });
+    const material = new THREE.MeshStandardMaterial({ color: 0x6bcfff });
     const platform = new THREE.Mesh(geometry, material);
 
     platform.position.set(x, y, z);
     platform.receiveShadow = true;
+    platform.castShadow = true;
+
     scene.add(platform);
     platforms.push(platform);
+
+    return platform;
+}
+
+function createCollectible(x, y, z) {
+    const geometry = new THREE.SphereGeometry(0.3, 16, 16);
+    const material = new THREE.MeshStandardMaterial({
+        color: 0xffd700,
+        emissive: 0xffd700,
+        emissiveIntensity: 0.5
+    });
+    const collectible = new THREE.Mesh(geometry, material);
+
+    collectible.position.set(x, y, z);
+    collectible.userData.collected = false;
+    collectible.userData.value = 10;
+
+    scene.add(collectible);
+    collectibles.push(collectible);
+
+    return collectible;
+}
+
+function createGoal(x, y, z) {
+    const geometry = new THREE.CylinderGeometry(1, 1, 2, 32);
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x00ff00,
+        emissive: 0x00ff00,
+        emissiveIntensity: 0.3
+    });
+    const goal = new THREE.Mesh(geometry, material);
+
+    goal.position.set(x, y, z);
+    goal.userData.isGoal = true;
+
+    scene.add(goal);
+
+    return goal;
+}
+
+// ========================================
+// GESTION DE NIVEAU
+// ========================================
+function loadLevel(levelName) {
+    clearLevel();
+
+    const data = LEVELS[levelName];
+    currentLevel = levelName;
+    score = 0;
+
+    // Charger les plateformes
+    data.platforms.forEach(p => {
+        createPlatform(p.x, p.y, p.z, p.w, p.h, p.d);
+    });
+
+    // Charger les collectibles
+    data.collectibles.forEach(c => {
+        createCollectible(c.x, c.y, c.z);
+    });
+
+    // Positionner le joueur
+    player.mesh.position.set(
+        data.playerStart.x,
+        data.playerStart.y,
+        data.playerStart.z
+    );
+    player.velocity.set(0, 0, 0);
+
+    // Créer l'objectif
+    createGoal(data.goal.x, data.goal.y, data.goal.z);
+
+    console.log('Niveau chargé:', levelName);
+}
+
+function clearLevel() {
+    // Retirer toutes les plateformes
+    platforms.forEach(p => scene.remove(p));
+    platforms = [];
+
+    // Retirer tous les collectibles
+    collectibles.forEach(c => scene.remove(c));
+    collectibles = [];
 }
 
 // ========================================
 // ÉCLAIRAGE
 // ========================================
 function setupLights() {
-    // Lumière ambiante
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    // Lumière directionnelle
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(10, 20, 10);
     directionalLight.castShadow = true;
     directionalLight.shadow.camera.left = -20;
@@ -150,16 +234,14 @@ function setupControls() {
 }
 
 function handleInput(dt) {
-    // Déplacement gauche/droite
     if (keys['ArrowLeft']) {
         player.velocity.x = -MOVE_SPEED;
     } else if (keys['ArrowRight']) {
         player.velocity.x = MOVE_SPEED;
     } else {
-        player.velocity.x *= 0.8; // Friction
+        player.velocity.x *= 0.8;
     }
 
-    // Saut
     if (keys['Space'] && player.isGrounded && player.canJump) {
         player.velocity.y = JUMP_FORCE;
         player.isGrounded = false;
@@ -175,15 +257,12 @@ function handleInput(dt) {
 // PHYSIQUE
 // ========================================
 function applyPhysics(dt) {
-    // Gravité
     player.velocity.y -= GRAVITY * dt;
 
-    // Mise à jour position
     player.mesh.position.x += player.velocity.x * dt;
     player.mesh.position.y += player.velocity.y * dt;
     player.mesh.position.z += player.velocity.z * dt;
 
-    // Limiter vitesse de chute
     if (player.velocity.y < -50) {
         player.velocity.y = -50;
     }
@@ -209,11 +288,31 @@ function checkCollisions() {
         }
     });
 
-    // Respawn si chute
     if (player.mesh.position.y < -10) {
-        player.mesh.position.set(0, 5, 0);
-        player.velocity.set(0, 0, 0);
+        loadLevel(currentLevel);  // ← Recharger le niveau
     }
+}
+
+// ========================================
+// UPDATE COLLECTIBLES
+// ========================================
+function updateCollectibles(dt) {
+    collectibles.forEach(item => {
+        if (!item.userData.collected) {
+            // Animation rotation
+            item.rotation.y += 2 * dt;
+
+            // Vérifier collision
+            const distance = player.mesh.position.distanceTo(item.position);
+
+            if (distance < 1) {
+                item.userData.collected = true;
+                item.visible = false;
+                score += item.userData.value;
+                console.log('Score:', score);
+            }
+        }
+    });
 }
 
 // ========================================
@@ -246,6 +345,7 @@ function update(dt) {
     handleInput(dt);
     applyPhysics(dt);
     checkCollisions();
+    updateCollectibles(dt);  // ← Nouvelle fonction
     updateCamera();
 }
 
@@ -257,11 +357,3 @@ function render() {
 // DÉMARRAGE
 // ========================================
 init();
-
-
-
-
-
-
-
-
