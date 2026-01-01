@@ -1,3 +1,4 @@
+import './style.scss';
 import * as THREE from 'three';
 
 // ========================================
@@ -100,6 +101,8 @@ let keys = {};
 let clock;
 let score = 0;
 let currentLevelIndex = 0;
+let totalCollectibles = 0;
+let collectedCount = 0;
 
 // ========================================
 // INITIALISATION
@@ -251,7 +254,11 @@ function loadLevel(levelName) {
 
     const data = LEVELS[levelName];
     currentLevelIndex = LEVEL_ORDER.indexOf(levelName);
+
+    // Reset score et compteurs
     score = 0;
+    collectedCount = 0;
+    totalCollectibles = data.collectibles.length;
 
     console.log('========================================');
     console.log('Chargement:', data.name);
@@ -277,6 +284,9 @@ function loadLevel(levelName) {
 
     // Créer l'objectif
     createGoal(data.goal.x, data.goal.y, data.goal.z);
+
+    // Mettre à jour le HUD
+    updateHUD();
 }
 
 function clearLevel() {
@@ -327,6 +337,25 @@ function showVictoryScreen() {
         currentLevelIndex = 0;
         loadLevel(LEVEL_ORDER[0]);
     }, 3000);
+}
+
+// ========================================
+// UPDATE HUD
+// ========================================
+function updateHUD() {
+    // Mettre à jour le score
+    document.getElementById('score-value').textContent = score;
+
+    // Mettre à jour les collectibles
+    document.getElementById('collectibles-value').textContent =
+        `${collectedCount} / ${totalCollectibles}`;
+
+    // Mettre à jour le nom du niveau
+    const levelData = LEVELS[LEVEL_ORDER[currentLevelIndex]];
+    if (levelData && levelData.name) {
+        document.getElementById('level-name').querySelector('h2').textContent =
+            levelData.name;
+    }
 }
 
 // ========================================
@@ -457,7 +486,14 @@ function updateCollectibles(dt) {
             if (distance < 1) {
                 item.userData.collected = true;
                 item.visible = false;
+
+                // Ajouter au score
                 score += item.userData.value;
+                collectedCount++;
+
+                // Mettre à jour le HUD
+                updateHUD();
+
                 console.log('⭐ Collectible! Score:', score);
             }
         }

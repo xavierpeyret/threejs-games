@@ -1,14 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>My first three.js app</title>
-  <style>
-  
-  </style>
+    <meta charset="utf-8">
+    <title>My first three.js app</title>
 </head>
 <body>
 <canvas id="three-canvas"></canvas>
+
+<!-- HUD Container -->
+<div id="hud">
+    <!-- Nom du niveau -->
+    <div id="level-name">
+        <h2>Tutorial</h2>
+    </div>
+
+    <!-- Score -->
+    <div id="score-display">
+        <span class="label">Score:</span>
+        <span id="score-value">0</span>
+    </div>
+
+    <!-- Collectibles -->
+    <div id="collectibles-counter">
+        <span class="label">⭐</span>
+        <span id="collectibles-value">0 / 0</span>
+    </div>
+</div>
 
 <script type="module" src="main.js"></script>
 </body>
