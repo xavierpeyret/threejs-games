@@ -63,9 +63,9 @@ const LEVELS = {
     tutorial: {
         name: "Tutoriel",
         platforms: [
-            { x: 0,  y: 0, z: 0, w: 10, h: 1, d: 10, type: 'start' },
+            { x: 0,  y: 0, z: 0, w: 10, h: 1, d: 5, type: 'start' },
             { x: 32, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
-            { x: 42, y: 0, z: 0, w: 12, h: 1, d: 12, type: 'goal' }
+            { x: 42, y: 0, z: 0, w: 12, h: 1, d: 5, type: 'goal' }
         ],
         movingPlatforms: [
             { x: 8, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'horizontal', speed: 1, range: 3 },
@@ -1112,7 +1112,7 @@ function updateCamera() {
     const targetPosition = new THREE.Vector3(
         playerWorldPos.x,
         playerWorldPos.y + 5,
-        playerWorldPos.z + 10
+        playerWorldPos.z + 50
     );
 
     camera.position.lerp(targetPosition, 0.1);
