@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a 3D platformer game built with Three.js and Vite. The player controls a character navigating through levels with platforms, collectibles, and a goal, using physics-based movement with jumping and gravity.
+This is a 3D platformer game built with Three.js and Vite. The player controls a character navigating through levels with platforms, collectibles, moving platforms, and a goal, using physics-based movement with jumping and gravity.
 
 ## Development Commands
 
@@ -18,74 +18,106 @@ This is a 3D platformer game built with Three.js and Vite. The player controls a
 
 The entire game logic is contained in `main.js` with a functional/procedural approach organized into clear sections:
 
-**Constants** (lines 6-19):
-- Physics constants: `GRAVITY` (20), `JUMP_FORCE` (12), `MOVE_SPEED` (8)
+**Constants** (lines 4-20):
+- Physics constants: `GRAVITY` (20), `JUMP_FORCE` (12), `MOVE_SPEED` (8), `PLAYER_SIZE` (1)
 - Platform colors by type (start, normal, jump-intro, height-intro, rhythm, goal)
 
-**Level Data** (lines 24-89):
-- `LEVELS` object contains level definitions (tutorial, level1, level2)
-- Each level specifies: platforms (with position, size, type), collectibles, playerStart, goal
-- `LEVEL_ORDER` array defines level sequence
-
-**Global State** (lines 94-102):
+**Variables Globales** (lines 22-38):
 - Scene, camera, renderer, player object
-- Arrays: platforms, collectibles
+- Arrays: platforms, movingPlatforms, collectibles
 - Input tracking: `keys` object
-- Game state: score, currentLevelIndex
+- Game state: score, currentLevelIndex, totalCollectibles, collectedCount
+- Debug: debugFrameCount, debugMode
+
+**Level Data** (lines 40-112):
+- `LEVELS` object contains level definitions (tutorial, level1, level2)
+- Each level specifies:
+  - `platforms`: Static platforms (position, size, type)
+  - `movingPlatforms`: Moving platforms (position, size, type, speed, range)
+  - `collectibles`: Collectible positions
+  - `playerStart`: Initial player position
+  - `goal`: Goal position
+- `LEVEL_ORDER` array defines level sequence
 
 **Core Systems**:
 
-1. **Initialization** (lines 107-152):
+1. **Initialization** (lines 117-158):
    - `init()` orchestrates setup
    - `setupThreeJS()` creates scene with fog, camera, renderer with shadows
    - Window resize handling
 
-2. **Player System** (lines 157-175):
+2. **Player System** (lines 167-187):
    - `createPlayer()` creates player mesh with physics properties
    - Player object structure: { mesh, velocity, isGrounded, canJump }
 
-3. **Factory Functions** (lines 180-244):
+3. **Factory Functions** (lines 190-287):
    - `createPlatform(x, y, z, w, h, d, type)` - creates platforms with color-coded types
    - `createCollectible(x, y, z)` - creates golden spheres worth 10 points
    - `createGoal(x, y, z)` - creates green cylinder goal marker
+   - `createMovingPlatform(x, y, z, w, h, d, config)` - creates moving platforms with userData for movement
 
-4. **Level Management** (lines 249-330):
-   - `loadLevel(levelName)` - clears and loads level data
+4. **Level Management** (lines 290-393):
+   - `loadLevel(levelName)` - clears and loads level data including moving platforms
    - `clearLevel()` - removes all scene objects
    - `nextLevel()` - advances to next level with 1s delay
    - `resetLevel()` - reloads current level
    - `showVictoryScreen()` - displays victory message and restarts after 3s
+   - `updateHUD()` - updates score, collectibles count, and level name display
 
-5. **Lighting** (lines 335-349):
+5. **Lighting** (lines 414-430):
    - Ambient light (0.6 intensity) + Directional light (0.8 intensity)
    - Shadow mapping with 2048x2048 resolution
 
-6. **Input System** (lines 354-388):
+6. **Input System** (lines 433-481):
    - WASD/Arrow keys for movement (A/Q for left, D for right)
    - Space/W/Z/ArrowUp for jump (only when grounded)
    - Level shortcuts: Digit1-3 for quick level switching, KeyR for reset
+   - **KeyP**: Toggle debug mode
    - `handleInput(dt)` applies input with friction (0.8 damping)
+   - **Parent detachment on jump**: Player detaches from moving platforms when jumping
 
-7. **Physics** (lines 393-403):
+7. **Physics** (lines 483-495):
    - `applyPhysics(dt)` applies gravity and velocity
    - Terminal velocity capped at -50
 
-8. **Collision Detection** (lines 408-440):
-   - AABB collision using `THREE.Box3`
-   - Platform collision sets isGrounded and adjusts position
+8. **Collision Detection** (lines 498-602):
+   - **Advanced AABB collision** using `THREE.Box3`
+   - **Horizontal bounds checking**: Verifies player is above platform (not on side)
+     - Uses **local coordinates** for attached platforms
+     - Uses **world coordinates** for static platforms
+   - **Parent-Child Attachment System**:
+     - Mobile platforms attach player using `.attach()` (preserves world position)
+     - Attaches only once per platform landing
+     - Adjusts local Y position when already attached
+   - **Smart Detachment**: Detaches when player leaves platform horizontally
    - Goal collision (distance < 2) triggers nextLevel()
-   - Fall respawn at y < -10
+   - Fall respawn at y < -10 (uses world position)
 
-9. **Collectibles** (lines 445-465):
+9. **Collectibles** (lines 606-638):
    - Rotation animation (2 rad/s) and bobbing motion
-   - Collection on distance < 1, adds 10 to score
+   - Collection detection using **world position** (distance < 1)
+   - Adds 10 to score
    - Console logging for feedback
 
-10. **Camera** (lines 480-489):
+10. **Moving Platforms** (lines 640-665):
+    - `updateMovingPlatforms(dt)` updates platform positions
+    - **Three movement types**:
+      - `horizontal`: Sine wave movement on X axis
+      - `vertical`: Sine wave movement on Y axis
+      - `circular`: Circular movement on X-Z plane
+    - Platform data stored in `userData`: type, speed, range, startPos, time
+
+11. **Debug System** (lines 677-701):
+    - `debugPlayer()` displays player state every 10 seconds when debugMode is active
+    - Shows: world position, local position, parent (SCENE/PLATFORM), grounded state, velocity
+    - Toggle with **KeyP**
+
+12. **Camera** (lines 703-719):
     - Third-person follow camera with lerp smoothing (0.1)
+    - **Uses world position** of player (handles local/world coordinate conversion)
     - Positioned at player + (0, 5, 10), looks at player
 
-11. **Game Loop** (lines 494-514):
+13. **Game Loop** (lines 721-747):
     - `gameLoop()` uses requestAnimationFrame
     - `update(dt)` calls all system updates with delta time
     - `render()` renders scene
@@ -100,19 +132,30 @@ The entire game logic is contained in `main.js` with a functional/procedural app
 
 **Console-Based Feedback**: Game events (collectibles, deaths, level changes) log to console instead of UI.
 
+**Parent-Child System for Moving Platforms**:
+- Uses Three.js `.attach()` method to preserve world position when reparenting
+- Player becomes child of moving platform → automatically follows all platform movements
+- Detaches on jump or when leaving platform bounds
+- All collision/distance checks use `getWorldPosition()` to handle local vs world coordinates
+
+**World Position Consistency**:
+- Camera tracking uses `getWorldPosition()`
+- Collectible detection uses `getWorldPosition()`
+- Goal detection uses `getWorldPosition()`
+- Fall detection uses `getWorldPosition()`
+
 ### Known Limitations
 
-- No UI overlay (score/level name only in console)
-- No enemy system (enemies array/logic commented out in roadmap)
-- No moving platforms (planned in roadmap)
-- No particle effects (planned in roadmap)
+- ~~No moving platforms~~ ✅ Implemented with parent-child system
+- No enemy system
+- No particle effects
 - Camera OrbitControls not used (camera is lerp-based follow cam)
 - GSAP imported but unused
 - Jump input requires key release to jump again (canJump flag)
 
 ### Project Documentation
 
-- `ROADMAP.md` - Detailed 4-phase implementation plan for UI, moving platforms, enemies, and particles (10-13h estimated)
+- `ROADMAP.md` - Detailed 4-phase implementation plan for UI, moving platforms, enemies, and particles
 - `ideas.md` - Comprehensive list of potential features organized by priority
 
 ### Key Dependencies
@@ -126,7 +169,7 @@ The entire game logic is contained in `main.js` with a functional/procedural app
 
 Minimal SCSS in `style.scss`:
 - CSS reset (margin/padding)
-- `#three-canvas` positioned fixed fullscreen (z-index: 1)
+- Fullscreen canvas with HUD overlay
 
 ## Development Notes
 
@@ -134,6 +177,20 @@ When adding features:
 - Follow the existing section-based organization in main.js
 - Use delta time for all animations/physics
 - Add new level data to LEVELS object rather than hardcoding
+- Use `getWorldPosition()` for all distance/position checks (handles parent-child relationships)
 - Console.log for debugging and player feedback
 - Use factory functions for creating game objects
 - Clear objects in `clearLevel()` to prevent memory leaks
+- When working with moving platforms, remember:
+  - Use `.attach()` not `.add()` for reparenting with position preservation
+  - Check horizontal bounds in **local coordinates** for attached players
+  - Always detach before repositioning in world coordinates
+
+## Debug Mode
+
+- Press **P** to toggle debug mode
+- When active, shows player state every 10 seconds:
+  - World position vs local position
+  - Parent object (SCENE or PLATFORM type)
+  - Grounded state
+  - Velocity vector

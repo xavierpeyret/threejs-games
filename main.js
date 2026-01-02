@@ -20,6 +20,24 @@ const PLATFORM_COLORS = {
 };
 
 // ========================================
+// VARIABLES GLOBALES
+// ========================================
+let scene, camera, renderer;
+let player;
+let platforms = [];
+let movingPlatforms = [];
+let collectibles = [];
+let goalObject = null;
+let keys = {};
+let clock;
+let score = 0;
+let currentLevelIndex = 0;
+let totalCollectibles = 0;
+let collectedCount = 0;
+let debugFrameCount = 0;
+let debugMode = false;
+
+// ========================================
 // DONNÉES DES NIVEAUX
 // ========================================
 const LEVELS = {
@@ -94,23 +112,7 @@ const LEVELS = {
 // Ordre des niveaux
 const LEVEL_ORDER = ['tutorial', 'level1', 'level2'];
 
-// ========================================
-// VARIABLES GLOBALES
-// ========================================
-let scene, camera, renderer;
-let player;
-let platforms = [];
-let movingPlatforms = [];
-let collectibles = [];
-let goalObject = null;
-let keys = {};
-let clock;
-let score = 0;
-let currentLevelIndex = 0;
-let totalCollectibles = 0;
-let collectedCount = 0;
-let debugFrameCount = 0;
-let debugMode = false;
+
 
 // ========================================
 // INITIALISATION
