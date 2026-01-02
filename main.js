@@ -56,8 +56,10 @@ let totalCollectibles = 0;
 let collectedCount = 0;
 let debugFrameCount = 0;
 let debugMode = false;
-let editorMode = false; // Mode éditeur activé par défaut
+let editorMode = true; // Mode éditeur activé par défaut
 let orbitControls = null;
+let raycaster = null;
+let mouse = new THREE.Vector2();
 
 // ========================================
 // DONNÉES DES NIVEAUX
@@ -68,7 +70,7 @@ const LEVELS = {
         platforms: [
             { x: 0,  y: 0, z: 0, w: 10, h: 1, d: 5, type: 'start' },
             { x: 32, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
-            { x: 42, y: 0, z: 0, w: 12, h: 1, d: 5, type: 'goal' }
+            { x: 100, y: 0, z: 0, w: 12, h: 1, d: 5, type: 'goal' }
         ],
         movingPlatforms: [
             { x: 8, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'horizontal', speed: 1, range: 3 },
@@ -143,6 +145,8 @@ function init() {
     setupThreeJS();
     createPlayer();
     setupLights();
+    setupLevelHelpers();
+    setupConsoleHelper();
     setupControls();
 
     loadLevel(LEVEL_ORDER[0]);
@@ -610,13 +614,21 @@ function loadLevel(levelName) {
     // Créer l'objectif
     createGoal(data.goal.x, data.goal.y, data.goal.z);
 
+    // Ajouter les labels en mode éditeur
+    addLabelsToAllPlatforms();
+
     // Mettre à jour le HUD
     updateHUD();
 }
 
 function clearLevel() {
-    // Retirer toutes les plateformes
-    platforms.forEach(p => scene.remove(p));
+    // Retirer toutes les plateformes et leurs labels
+    platforms.forEach(p => {
+        if (p.userData.label) {
+            scene.remove(p.userData.label);
+        }
+        scene.remove(p);
+    });
     platforms = [];
     movingPlatforms = [];
 
@@ -705,6 +717,157 @@ function setupLights() {
     directionalLight.shadow.mapSize.width = 2048;
     directionalLight.shadow.mapSize.height = 2048;
     scene.add(directionalLight);
+}
+
+// ========================================
+// HELPERS DE NIVEAU (Grille, Axes)
+// ========================================
+function setupLevelHelpers() {
+    if (!editorMode) return;
+
+    // Grille au sol (size, divisions)
+    const gridHelper = new THREE.GridHelper(200, 50, 0x888888, 0x444444);
+    gridHelper.position.y = -0.5; // Légèrement en dessous de y=0
+    scene.add(gridHelper);
+
+    // Axes de référence (taille)
+    // Rouge = X, Vert = Y, Bleu = Z
+    const axesHelper = new THREE.AxesHelper(10);
+    axesHelper.position.y = 0.1; // Légèrement au-dessus du sol
+    scene.add(axesHelper);
+
+    console.log('📐 [EDITOR] Grille et axes activés');
+    console.log('   - Rouge = X axis');
+    console.log('   - Vert = Y axis');
+    console.log('   - Bleu = Z axis');
+}
+
+// ========================================
+// LABELS DE COORDONNÉES
+// ========================================
+function createTextSprite(text, color = '#ffffff') {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = 256;
+    canvas.height = 128;
+
+    // Style du texte
+    context.fillStyle = color;
+    context.font = 'Bold 20px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    // Fond semi-transparent
+    context.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Texte
+    context.fillStyle = color;
+    context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(4, 2, 1);
+
+    return sprite;
+}
+
+function addPlatformLabel(platform) {
+    if (!editorMode) return;
+
+    const pos = platform.position;
+    const geom = platform.geometry.parameters;
+
+    // Texte avec coordonnées et dimensions
+    const text = `(${pos.x}, ${pos.y}, ${pos.z})\n${geom.width}×${geom.height}×${geom.depth}`;
+
+    const label = createTextSprite(text, '#ffff00');
+
+    // Positionner au-dessus de la plateforme
+    label.position.set(pos.x, pos.y + geom.height / 2 + 1.5, pos.z);
+
+    scene.add(label);
+
+    // Stocker la référence pour nettoyage
+    if (!platform.userData.label) {
+        platform.userData.label = label;
+    }
+}
+
+function addLabelsToAllPlatforms() {
+    if (!editorMode) return;
+
+    platforms.forEach(platform => {
+        addPlatformLabel(platform);
+    });
+
+    console.log('🏷️ [EDITOR] Labels ajoutés aux plateformes');
+}
+
+// ========================================
+// CONSOLE HELPER (Click pour coordonnées)
+// ========================================
+function setupConsoleHelper() {
+    if (!editorMode) return;
+
+    raycaster = new THREE.Raycaster();
+
+    // Détection des clics
+    window.addEventListener('click', onMouseClick);
+
+    console.log('🖱️ [EDITOR] Console helper activé');
+    console.log('   - Cliquez sur une plateforme pour voir ses infos');
+    console.log('   - Shift+Click pour copier les coordonnées');
+}
+
+function onMouseClick(event) {
+    if (!editorMode) return;
+
+    // Calculer les coordonnées normalisées de la souris
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    // Mettre à jour le raycaster
+    raycaster.setFromCamera(mouse, camera);
+
+    // Détecter les intersections avec les plateformes
+    const intersects = raycaster.intersectObjects(platforms);
+
+    if (intersects.length > 0) {
+        const platform = intersects[0].object;
+        const pos = platform.position;
+        const geom = platform.geometry.parameters;
+        const type = platform.userData.type || 'normal';
+        const isMoving = platform.userData.isMoving || false;
+
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📦 [PLATEFORME SÉLECTIONNÉE]');
+        console.log('   Position:', `{ x: ${pos.x}, y: ${pos.y}, z: ${pos.z} }`);
+        console.log('   Dimensions:', `{ w: ${geom.width}, h: ${geom.height}, d: ${geom.depth} }`);
+        console.log('   Type:', type);
+        console.log('   Mobile:', isMoving);
+        console.log('');
+        console.log('💾 Code à copier:');
+        console.log(`   { x: ${pos.x}, y: ${pos.y}, z: ${pos.z}, w: ${geom.width}, h: ${geom.height}, d: ${geom.depth}, type: '${type}' }`);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+        // Si Shift est pressé, copier dans le presse-papier
+        if (event.shiftKey) {
+            const code = `{ x: ${pos.x}, y: ${pos.y}, z: ${pos.z}, w: ${geom.width}, h: ${geom.height}, d: ${geom.depth}, type: '${type}' }`;
+            navigator.clipboard.writeText(code).then(() => {
+                console.log('✅ Copié dans le presse-papier!');
+            });
+        }
+    } else {
+        // Clic sur le vide - afficher la position 3D approximative
+        const point = intersects[0]?.point || new THREE.Vector3();
+        if (intersects.length === 0) {
+            // Calculer le point sur le plan y=0
+            raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), point);
+            console.log('📍 Position approximative (y=0):', `{ x: ${point.x.toFixed(1)}, y: 0, z: ${point.z.toFixed(1)} }`);
+        }
+    }
 }
 
 // ========================================
@@ -1161,14 +1324,18 @@ function gameLoop() {
 }
 
 function update(dt) {
-    handleInput(dt);
-    updateMovingPlatforms(dt);  // Déplacer les plateformes AVANT la physique
-    applyPhysics(dt);
-    checkCollisions();
-    updateCollectibles(dt);
-    updateEnemies(dt);
-    updateGoal(dt);
-    debugPlayer();
+    if (!editorMode) {
+        handleInput(dt);
+        updateMovingPlatforms(dt);  // Déplacer les plateformes AVANT la physique
+        applyPhysics(dt);
+        checkCollisions();
+        updateCollectibles(dt);
+        updateEnemies(dt);
+        updateGoal(dt);
+        debugPlayer();
+    } else {
+        updateMovingPlatforms(dt);
+    }
     // La caméra se met à jour dans tous les cas (gère OrbitControls en mode éditeur)
     updateCamera();
 }
