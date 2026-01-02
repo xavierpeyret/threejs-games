@@ -45,8 +45,6 @@ const LEVELS = {
         name: "Tutoriel",
         platforms: [
             { x: 0,  y: 0, z: 0, w: 10, h: 1, d: 10, type: 'start' },
-            { x: 12, y: 0, z: 0, w: 6,  h: 1, d: 6,  type: 'jump-intro' },
-            { x: 20, y: 2, z: 0, w: 5,  h: 1, d: 5,  type: 'height-intro' },
             { x: 27, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
             { x: 32, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
             { x: 37, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
@@ -496,6 +494,162 @@ function applyPhysics(dt) {
 }
 
 // ========================================
+// COLLISION HELPERS
+// ========================================
+function calculateOverlapX(boxA, boxB) {
+    const overlapMin = Math.max(boxA.min.x, boxB.min.x);
+    const overlapMax = Math.min(boxA.max.x, boxB.max.x);
+    return Math.max(0, overlapMax - overlapMin);
+}
+
+function calculateOverlapY(boxA, boxB) {
+    const overlapMin = Math.max(boxA.min.y, boxB.min.y);
+    const overlapMax = Math.min(boxA.max.y, boxB.max.y);
+    return Math.max(0, overlapMax - overlapMin);
+}
+
+function calculateOverlapZ(boxA, boxB) {
+    const overlapMin = Math.max(boxA.min.z, boxB.min.z);
+    const overlapMax = Math.min(boxA.max.z, boxB.max.z);
+    return Math.max(0, overlapMax - overlapMin);
+}
+
+function getBoxCenter(box) {
+    return new THREE.Vector3(
+        (box.min.x + box.max.x) / 2,
+        (box.min.y + box.max.y) / 2,
+        (box.min.z + box.max.z) / 2
+    );
+}
+
+function isPlayerAbovePlatform(playerWorldPos, platformBox, player, platform) {
+    // Si le joueur est attaché à cette plateforme, vérifier en coordonnées locales
+    if (player.mesh.parent === platform) {
+        const platformWidth = platform.geometry.parameters.width;
+        const platformDepth = platform.geometry.parameters.depth;
+        const localPos = player.mesh.position;
+
+        return localPos.x >= -platformWidth / 2 &&
+               localPos.x <= platformWidth / 2 &&
+               localPos.z >= -platformDepth / 2 &&
+               localPos.z <= platformDepth / 2;
+    }
+
+    // Sinon vérifier en coordonnées mondiales
+    return playerWorldPos.x >= platformBox.min.x &&
+           playerWorldPos.x <= platformBox.max.x &&
+           playerWorldPos.z >= platformBox.min.z &&
+           playerWorldPos.z <= platformBox.max.z;
+}
+
+// ========================================
+// COLLISION RESOLUTION
+// ========================================
+function resolveVerticalCollision(platform, platformBox, playerWorldPos) {
+    // Vérifier si le joueur est bien au-dessus de la plateforme horizontalement
+    const isAbove = isPlayerAbovePlatform(playerWorldPos, platformBox, player, platform);
+
+    if (!isAbove) {
+        return false; // Pas une collision verticale valide
+    }
+
+    player.velocity.y = 0;
+    player.isGrounded = true;
+
+    // Gérer l'attachement aux plateformes mobiles
+    if (platform.userData.isMoving && player.mesh.parent !== platform) {
+        // S'assurer que le joueur est dans la scène avant de repositionner
+        if (player.mesh.parent !== scene) {
+            scene.attach(player.mesh);
+        }
+
+        // Positionner au sommet de la plateforme en coordonnées mondiales
+        const targetY = platformBox.max.y + PLAYER_SIZE / 2;
+        player.mesh.position.y = targetY;
+
+        // Attacher à la plateforme (préserve la position mondiale)
+        platform.attach(player.mesh);
+
+    } else if (player.mesh.parent === platform) {
+        // Déjà attaché : juste ajuster la position locale Y
+        const platformHeight = platform.geometry.parameters.height;
+        const localY = platformHeight / 2 + PLAYER_SIZE / 2;
+        player.mesh.position.y = localY;
+
+    } else {
+        // Plateforme statique : juste définir la position Y
+        const targetY = platformBox.max.y + PLAYER_SIZE / 2;
+        player.mesh.position.y = targetY;
+    }
+
+    return true;
+}
+
+function resolveHorizontalCollisionX(playerBox, platformBox, platform) {
+    const playerCenter = getBoxCenter(playerBox);
+    const platformCenter = getBoxCenter(platformBox);
+
+    const overlap = calculateOverlapX(playerBox, platformBox);
+
+    // Déterminer la direction de repoussement
+    const pushDirection = (playerCenter.x < platformCenter.x) ? -1 : 1;
+    const pushAmount = overlap * pushDirection;
+
+    // Gérer les coordonnées locales vs mondiales
+    if (player.mesh.parent === scene) {
+        // Cas simple : joueur dans l'espace mondial
+        player.mesh.position.x += pushAmount;
+    } else {
+        // Cas complexe : joueur attaché à une plateforme
+        // Détacher, ajuster la position mondiale, réattacher si nécessaire
+        const worldPos = new THREE.Vector3();
+        player.mesh.getWorldPosition(worldPos);
+        worldPos.x += pushAmount;
+
+        const currentParent = player.mesh.parent;
+        scene.attach(player.mesh);
+        player.mesh.position.copy(worldPos);
+
+        // Réattacher si était sur une plateforme mobile
+        if (currentParent !== scene && currentParent.userData?.isMoving) {
+            currentParent.attach(player.mesh);
+        }
+    }
+
+    // Annuler la vélocité X
+    player.velocity.x = 0;
+}
+
+function resolveHorizontalCollisionZ(playerBox, platformBox, platform) {
+    const playerCenter = getBoxCenter(playerBox);
+    const platformCenter = getBoxCenter(platformBox);
+
+    const overlap = calculateOverlapZ(playerBox, platformBox);
+
+    const pushDirection = (playerCenter.z < platformCenter.z) ? -1 : 1;
+    const pushAmount = overlap * pushDirection;
+
+    if (player.mesh.parent === scene) {
+        player.mesh.position.z += pushAmount;
+    } else {
+        // Gérer le joueur attaché
+        const worldPos = new THREE.Vector3();
+        player.mesh.getWorldPosition(worldPos);
+        worldPos.z += pushAmount;
+
+        const currentParent = player.mesh.parent;
+        scene.attach(player.mesh);
+        player.mesh.position.copy(worldPos);
+
+        if (currentParent !== scene && currentParent.userData?.isMoving) {
+            currentParent.attach(player.mesh);
+        }
+    }
+
+    player.velocity.z = 0;
+}
+
+// ========================================
 // COLLISIONS
 // ========================================
 function checkCollisions() {
@@ -510,63 +664,35 @@ function checkCollisions() {
         const platformBox = new THREE.Box3().setFromObject(platform);
 
         if (playerBox.intersectsBox(platformBox)) {
-            if (player.velocity.y < 0) {
-                // Vérifier si le joueur est bien au-dessus de la plateforme (horizontalement)
-                let isAbovePlatform = false;
+            // Vérifier d'abord si le joueur est au-dessus de la plateforme (horizontalement)
+            const isAbove = isPlayerAbovePlatform(playerWorldPos, platformBox, player, platform);
 
-                // Si le joueur est attaché à cette plateforme, vérifier en coordonnées locales
-                if (player.mesh.parent === platform) {
-                    const platformWidth = platform.geometry.parameters.width;
-                    const platformDepth = platform.geometry.parameters.depth;
-                    const localPos = player.mesh.position;
-
-                    isAbovePlatform =
-                        localPos.x >= -platformWidth / 2 &&
-                        localPos.x <= platformWidth / 2 &&
-                        localPos.z >= -platformDepth / 2 &&
-                        localPos.z <= platformDepth / 2;
-                } else {
-                    // Sinon vérifier en coordonnées mondiales
-                    isAbovePlatform =
-                        playerWorldPos.x >= platformBox.min.x &&
-                        playerWorldPos.x <= platformBox.max.x &&
-                        playerWorldPos.z >= platformBox.min.z &&
-                        playerWorldPos.z <= platformBox.max.z;
-                }
-
-                // Ne considérer comme grounded que si au-dessus horizontalement
-                if (!isAbovePlatform) {
-                    return; // Ignorer cette plateforme
-                }
-
-                player.velocity.y = 0;
-                player.isGrounded = true;
-
-                // Retenir sur quelle plateforme on est
-                standingOnPlatform = platform;
-
-                // SI plateforme mobile ET pas encore attaché → attacher (une seule fois)
-                if (platform.userData.isMoving && player.mesh.parent !== platform) {
-                    // S'assurer que le joueur est dans la scène avant de positionner
-                    if (player.mesh.parent !== scene) {
-                        scene.attach(player.mesh);
+            if (isAbove) {
+                // Le joueur est au-dessus : ne traiter QUE la collision verticale
+                if (player.velocity.y < 0) {
+                    const resolved = resolveVerticalCollision(platform, platformBox, playerWorldPos);
+                    if (resolved) {
+                        standingOnPlatform = platform;
                     }
+                }
+            } else {
+                // Le joueur est sur le CÔTÉ : traiter les collisions horizontales
+                const overlapX = calculateOverlapX(playerBox, platformBox);
+                const overlapY = calculateOverlapY(playerBox, platformBox);
+                const overlapZ = calculateOverlapZ(playerBox, platformBox);
 
-                    // Positionner en coordonnées mondiales
-                    const targetY = platformBox.max.y + PLAYER_SIZE / 2;
-                    player.mesh.position.y = targetY;
+                const minOverlap = Math.min(overlapX, overlapY, overlapZ);
 
-                    // Attacher à la plateforme (préserve la position mondiale)
-                    platform.attach(player.mesh);
-                } else if (player.mesh.parent === platform) {
-                    // Déjà attaché à cette plateforme : juste ajuster la position locale Y
-                    const platformHeight = platform.geometry.parameters.height;
-                    const localY = platformHeight / 2 + PLAYER_SIZE / 2;
-                    player.mesh.position.y = localY;
-                } else {
-                    // Plateforme normale (non mobile)
-                    const targetY = platformBox.max.y + PLAYER_SIZE / 2;
-                    player.mesh.position.y = targetY;
+                if (minOverlap === overlapX) {
+                    // COLLISION HORIZONTALE (axe X - gauche/droite)
+                    resolveHorizontalCollisionX(playerBox, platformBox, platform);
+                } else if (minOverlap === overlapZ) {
+                    // COLLISION HORIZONTALE (axe Z - avant/arrière)
+                    resolveHorizontalCollisionZ(playerBox, platformBox, platform);
+                } else if (minOverlap === overlapY) {
+                    // COLLISION VERTICALE depuis le bas (plafond)
+                    // Pour l'instant on ne gère pas les collisions de plafond
+                    // mais on pourrait arrêter la vélocité Y positive ici
                 }
             }
         }
@@ -732,10 +858,10 @@ function gameLoop() {
 
 function update(dt) {
     handleInput(dt);
+    updateMovingPlatforms(dt);  // Déplacer les plateformes AVANT la physique
     applyPhysics(dt);
     checkCollisions();
     updateCollectibles(dt);
-    updateMovingPlatforms(dt);
     updateGoal(dt);
     updateCamera();
     debugPlayer();

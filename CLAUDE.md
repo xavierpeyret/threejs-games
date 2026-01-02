@@ -80,16 +80,27 @@ The entire game logic is contained in `main.js` with a functional/procedural app
    - `applyPhysics(dt)` applies gravity and velocity
    - Terminal velocity capped at -50
 
-8. **Collision Detection** (lines 498-602):
-   - **Advanced AABB collision** using `THREE.Box3`
-   - **Horizontal bounds checking**: Verifies player is above platform (not on side)
-     - Uses **local coordinates** for attached platforms
-     - Uses **world coordinates** for static platforms
+8. **Collision Detection** (lines 498-723):
+   - **Multi-Directional AABB Collision System** using `THREE.Box3` and Separating Axis Theorem (SAT)
+   - **Helper Functions** (lines 501-545):
+     - `calculateOverlapX/Y/Z()`: Calculate penetration depth on each axis
+     - `getBoxCenter()`: Get center point of bounding box
+     - `isPlayerAbovePlatform()`: Check if player is horizontally within platform bounds
+   - **Collision Resolution Functions** (lines 547-652):
+     - `resolveVerticalCollision()`: Handles landing on platforms from above
+     - `resolveHorizontalCollisionX()`: Handles left/right collisions, stops X velocity
+     - `resolveHorizontalCollisionZ()`: Handles front/back collisions, stops Z velocity
+   - **Main Collision Logic** (lines 657-723):
+     - First checks if player is **above** platform (horizontally within bounds)
+     - **If above**: Only processes vertical collision (prevents spurious horizontal resolution)
+     - **If on side**: Calculates overlap on all axes, resolves on minimum overlap axis
+     - Handles collisions from ALL directions: top, bottom, left, right, front, back
    - **Parent-Child Attachment System**:
      - Mobile platforms attach player using `.attach()` (preserves world position)
      - Attaches only once per platform landing
      - Adjusts local Y position when already attached
    - **Smart Detachment**: Detaches when player leaves platform horizontally
+   - **Moving platforms can push player**: Lateral collisions work with moving platforms
    - Goal collision (distance < 2) triggers nextLevel()
    - Fall respawn at y < -10 (uses world position)
 
@@ -117,9 +128,17 @@ The entire game logic is contained in `main.js` with a functional/procedural app
     - **Uses world position** of player (handles local/world coordinate conversion)
     - Positioned at player + (0, 5, 10), looks at player
 
-13. **Game Loop** (lines 721-747):
+13. **Game Loop** (lines 854-863):
     - `gameLoop()` uses requestAnimationFrame
-    - `update(dt)` calls all system updates with delta time
+    - `update(dt)` calls all system updates with delta time in specific order:
+      1. `handleInput(dt)` - Process player input
+      2. `updateMovingPlatforms(dt)` - **Move platforms FIRST** (critical for lateral collision detection)
+      3. `applyPhysics(dt)` - Apply gravity and velocity
+      4. `checkCollisions()` - Detect and resolve collisions
+      5. `updateCollectibles(dt)` - Animate and check collectibles
+      6. `updateGoal(dt)` - Animate goal
+      7. `updateCamera()` - Follow player with camera
+      8. `debugPlayer()` - Debug output if enabled
     - `render()` renders scene
 
 ### Key Implementation Patterns
@@ -131,6 +150,17 @@ The entire game logic is contained in `main.js` with a functional/procedural app
 **Level Progression**: Levels are data-driven from the LEVELS object, making it easy to add new levels without code changes.
 
 **Console-Based Feedback**: Game events (collectibles, deaths, level changes) log to console instead of UI.
+
+**Multi-Directional Collision System**:
+- Uses **Separating Axis Theorem (SAT)** for AABB collision detection
+- Calculates penetration depth on all three axes (X, Y, Z)
+- Resolves collision on the axis with **minimum overlap** (collision direction)
+- **Smart collision prioritization**:
+  - If player is above platform (within horizontal bounds) → only vertical collision processed
+  - If player is on the side → horizontal collision processed (X or Z axis)
+- **Prevents spurious collisions**: Player won't be ejected from moving platforms they're standing on
+- Moving platforms can push player laterally when approaching from the side
+- All resolution functions handle both world and local coordinate systems
 
 **Parent-Child System for Moving Platforms**:
 - Uses Three.js `.attach()` method to preserve world position when reparenting
@@ -147,6 +177,10 @@ The entire game logic is contained in `main.js` with a functional/procedural app
 ### Known Limitations
 
 - ~~No moving platforms~~ ✅ Implemented with parent-child system
+- ~~No lateral collision detection~~ ✅ Implemented with multi-directional SAT system
+- No continuous collision detection (fast-moving objects may tunnel through thin platforms)
+- No ceiling collision handling (jumping into platform from below)
+- AABB-only collision (no support for rotated platforms)
 - No enemy system
 - No particle effects
 - Camera OrbitControls not used (camera is lerp-based follow cam)
@@ -185,6 +219,13 @@ When adding features:
   - Use `.attach()` not `.add()` for reparenting with position preservation
   - Check horizontal bounds in **local coordinates** for attached players
   - Always detach before repositioning in world coordinates
+- When working with collisions:
+  - The system uses SAT (Separating Axis Theorem) to detect collision direction
+  - Collision resolution happens on the axis with minimum penetration
+  - Players above platforms (horizontally within bounds) only get vertical collision processing
+  - Players on the side get horizontal collision resolution (X or Z axis)
+  - All resolution functions automatically handle local vs world coordinates
+  - Moving platforms are updated BEFORE physics to ensure accurate lateral collision detection
 
 ## Debug Mode
 
