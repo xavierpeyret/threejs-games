@@ -110,7 +110,7 @@ let currentLevelIndex = 0;
 let totalCollectibles = 0;
 let collectedCount = 0;
 let debugFrameCount = 0;
-let debugMode = false; // Activer/désactiver avec la touche 'D'
+let debugMode = false;
 
 // ========================================
 // INITIALISATION
@@ -465,23 +465,12 @@ function handleInput(dt) {
     if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW'] || keys['KeyZ']) && player.isGrounded && player.canJump) {
         // DÉTACHER du parent avant de sauter
         if (player.mesh.parent !== scene) {
-            console.log('🚀 [JUMP] Détachement avant saut');
-            const worldPos = new THREE.Vector3();
-            player.mesh.getWorldPosition(worldPos);
-            console.log('🚀 [JUMP] Position mondiale avant détachement:', worldPos.toArray().map(v => v.toFixed(2)));
-
             scene.attach(player.mesh);
-
-            const worldPosAfter = new THREE.Vector3();
-            player.mesh.getWorldPosition(worldPosAfter);
-            console.log('🚀 [JUMP] Position mondiale après détachement:', worldPosAfter.toArray().map(v => v.toFixed(2)));
-            console.log('🚀 [JUMP] Position locale après détachement:', player.mesh.position.toArray().map(v => v.toFixed(2)));
         }
 
         player.velocity.y = JUMP_FORCE;
         player.isGrounded = false;
         player.canJump = false;
-        console.log('🚀 [JUMP] Saut! Velocity.y =', JUMP_FORCE);
     }
 
     if (!keys['Space'] && !keys['ArrowUp'] && !keys['KeyW'] && !keys['KeyZ']) {
@@ -534,12 +523,6 @@ function checkCollisions() {
                         localPos.x <= platformWidth / 2 &&
                         localPos.z >= -platformDepth / 2 &&
                         localPos.z <= platformDepth / 2;
-
-                    if (debugMode && !isAbovePlatform) {
-                        console.log('⚠️ [SKIP] Joueur hors limites locales');
-                        console.log('  Local X:', localPos.x.toFixed(2), '| Limites: [', (-platformWidth/2).toFixed(2), ',', (platformWidth/2).toFixed(2), ']');
-                        console.log('  Local Z:', localPos.z.toFixed(2), '| Limites: [', (-platformDepth/2).toFixed(2), ',', (platformDepth/2).toFixed(2), ']');
-                    }
                 } else {
                     // Sinon vérifier en coordonnées mondiales
                     isAbovePlatform =
@@ -551,9 +534,6 @@ function checkCollisions() {
 
                 // Ne considérer comme grounded que si au-dessus horizontalement
                 if (!isAbovePlatform) {
-                    if (debugMode && player.mesh.parent !== platform) {
-                        console.log('⚠️ [SKIP] Collision ignorée : joueur pas au-dessus de la plateforme');
-                    }
                     return; // Ignorer cette plateforme
                 }
 
@@ -563,21 +543,8 @@ function checkCollisions() {
                 // Retenir sur quelle plateforme on est
                 standingOnPlatform = platform;
 
-                // Debug: position avant manipulation
-                if (debugMode) {
-                    const worldPosBefore = new THREE.Vector3();
-                    player.mesh.getWorldPosition(worldPosBefore);
-                    console.log('🔍 [COLLISION] Position mondiale avant:', worldPosBefore.toArray().map(v => v.toFixed(2)));
-                    console.log('🔍 [COLLISION] Parent actuel:', player.mesh.parent === scene ? 'SCENE' : 'PLATFORM');
-                }
-
                 // SI plateforme mobile ET pas encore attaché → attacher (une seule fois)
                 if (platform.userData.isMoving && player.mesh.parent !== platform) {
-                    // Le joueur n'est pas encore attaché à cette plateforme
-                    if (debugMode) {
-                        console.log('📎 [ATTACH] Premier attachement à plateforme mobile type:', platform.userData.type);
-                    }
-
                     // S'assurer que le joueur est dans la scène avant de positionner
                     if (player.mesh.parent !== scene) {
                         scene.attach(player.mesh);
@@ -587,35 +554,16 @@ function checkCollisions() {
                     const targetY = platformBox.max.y + PLAYER_SIZE / 2;
                     player.mesh.position.y = targetY;
 
-                    if (debugMode) {
-                        const worldPosBeforeAttach = new THREE.Vector3();
-                        player.mesh.getWorldPosition(worldPosBeforeAttach);
-                        console.log('📎 [ATTACH] Position mondiale avant attach:', worldPosBeforeAttach.toArray().map(v => v.toFixed(2)));
-                    }
-
                     // Attacher à la plateforme (préserve la position mondiale)
                     platform.attach(player.mesh);
-
-                    if (debugMode) {
-                        const worldPosAfterAttach = new THREE.Vector3();
-                        player.mesh.getWorldPosition(worldPosAfterAttach);
-                        console.log('📎 [ATTACH] Position mondiale après attach:', worldPosAfterAttach.toArray().map(v => v.toFixed(2)));
-                        console.log('📎 [ATTACH] Position locale après attach:', player.mesh.position.toArray().map(v => v.toFixed(2)));
-                    }
                 } else if (player.mesh.parent === platform) {
                     // Déjà attaché à cette plateforme : juste ajuster la position locale Y
-                    // Calculer la position locale Y correcte
                     const platformHeight = platform.geometry.parameters.height;
                     const localY = platformHeight / 2 + PLAYER_SIZE / 2;
                     player.mesh.position.y = localY;
-
-                    if (debugMode) {
-                        console.log('🔧 [ADJUST] Ajustement position locale Y:', localY.toFixed(2));
-                    }
                 } else {
                     // Plateforme normale (non mobile)
                     const targetY = platformBox.max.y + PLAYER_SIZE / 2;
-                    if (debugMode) console.log('🎯 [POSITION] Y cible:', targetY.toFixed(2), '| Y plateforme:', platformBox.max.y.toFixed(2));
                     player.mesh.position.y = targetY;
                 }
             }
@@ -624,20 +572,7 @@ function checkCollisions() {
 
     // Détacher du parent si on n'est plus sur aucune plateforme
     if (!standingOnPlatform && player.mesh.parent !== scene) {
-        if (debugMode) {
-            console.log('⚠️ [FALL] Joueur ne touche plus aucune plateforme, détachement');
-            const worldPos = new THREE.Vector3();
-            player.mesh.getWorldPosition(worldPos);
-            console.log('⚠️ [FALL] Position avant détachement:', worldPos.toArray().map(v => v.toFixed(2)));
-        }
-
         scene.attach(player.mesh);
-
-        if (debugMode) {
-            const worldPosAfter = new THREE.Vector3();
-            player.mesh.getWorldPosition(worldPosAfter);
-            console.log('⚠️ [FALL] Position après détachement:', worldPosAfter.toArray().map(v => v.toFixed(2)));
-        }
     }
 
     // Vérifier collision avec l'objectif
@@ -704,11 +639,9 @@ function updateCollectibles(dt) {
 // UPDATE MOVING PLATFORMS
 // ========================================
 function updateMovingPlatforms(dt) {
-    movingPlatforms.forEach((platform, index) => {
+    movingPlatforms.forEach(platform => {
         const data = platform.userData;
         data.time += dt;
-
-        const oldPos = platform.position.clone();
 
         if (data.type === 'horizontal') {
             // Mouvement horizontal (axe X)
@@ -725,12 +658,6 @@ function updateMovingPlatforms(dt) {
             const angle = data.time * data.speed;
             platform.position.x = data.startPos.x + Math.cos(angle) * data.range;
             platform.position.z = data.startPos.z + Math.sin(angle) * data.range;
-        }
-
-        // Debug: afficher le mouvement toutes les 120 frames
-        if (debugFrameCount % 1200=== 0) {
-            const delta = platform.position.clone().sub(oldPos);
-            console.log(`🔄 [PLATFORM ${index}] Type: ${data.type} | Pos: [${platform.position.toArray().map(v => v.toFixed(2))}] | Delta: [${delta.toArray().map(v => v.toFixed(2))}]`);
         }
     });
 }
@@ -751,8 +678,8 @@ function updateGoal(dt) {
 function debugPlayer() {
     debugFrameCount++;
 
-    // Afficher tous les 60 frames (environ 1 fois par seconde à 60fps)
-    if (debugFrameCount % 60 === 0) {
+    // Afficher tous les 60 frames (environ 1 fois par seconde à 60fps) si debugMode activé
+    if (debugMode && debugFrameCount % 600 === 0) {
         const worldPos = new THREE.Vector3();
         player.mesh.getWorldPosition(worldPos);
 
