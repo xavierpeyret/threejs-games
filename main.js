@@ -1,12 +1,13 @@
 import './style.scss';
 import * as THREE from 'three';
+import gsap from 'gsap';
 
 // ========================================
 // CONSTANTES
 // ========================================
 const GRAVITY = 20;
 const JUMP_FORCE = 12;
-const MOVE_SPEED = 8;
+const MOVE_SPEED = 6;
 const PLAYER_SIZE = 1;
 
 // Couleurs par type de plateforme
@@ -45,9 +46,7 @@ const LEVELS = {
         name: "Tutoriel",
         platforms: [
             { x: 0,  y: 0, z: 0, w: 10, h: 1, d: 10, type: 'start' },
-            { x: 27, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
             { x: 32, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
-            { x: 37, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
             { x: 42, y: 0, z: 0, w: 12, h: 1, d: 12, type: 'goal' }
         ],
         movingPlatforms: [
@@ -109,8 +108,6 @@ const LEVELS = {
 
 // Ordre des niveaux
 const LEVEL_ORDER = ['tutorial', 'level1', 'level2'];
-
-
 
 // ========================================
 // INITIALISATION
@@ -471,6 +468,25 @@ function handleInput(dt) {
         player.velocity.y = JUMP_FORCE;
         player.isGrounded = false;
         player.canJump = false;
+
+        // ANIMATION DE SAUT
+        // Rotation complète
+        gsap.to(player.mesh.rotation, {
+            x: player.mesh.rotation.x + Math.PI * 2,
+            duration: 0.6,
+            ease: "power2.out"
+        });
+
+        // Léger stretch vertical
+        gsap.to(player.mesh.scale, {
+            x: 0.85,
+            y: 1.2,
+            z: 0.85,
+            duration: 0.15,
+            ease: "power2.out",
+            yoyo: true,
+            repeat: 1
+        });
     }
 
     if (!keys['Space'] && !keys['ArrowUp'] && !keys['KeyW'] && !keys['KeyZ']) {
@@ -785,7 +801,7 @@ function updateMovingPlatforms(dt) {
             // Mouvement circulaire
             const angle = data.time * data.speed;
             platform.position.x = data.startPos.x + Math.cos(angle) * data.range;
-            platform.position.z = data.startPos.z + Math.sin(angle) * data.range;
+            platform.position.y = data.startPos.y + Math.sin(angle) * data.range;
         }
     });
 }
