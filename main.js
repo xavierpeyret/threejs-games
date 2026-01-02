@@ -20,6 +20,23 @@ const PLATFORM_COLORS = {
     goal: 0xFFD700        // Or
 };
 
+// Constantes pour les ennemis
+const ENEMY_COLORS = {
+    static: 0xff4444,    // Rouge clair
+    patrol: 0xff8800,    // Orange
+    flying: 0xaa00ff,    // Violet
+    chaser: 0xff0088     // Rose
+};
+
+const ENEMY_SIZES = {
+    static: 0.5,
+    patrol: 0.6,
+    flying: 0.5,
+    chaser: 0.7
+};
+
+const ENEMY_COLLISION_RADIUS = 1.0;
+
 // ========================================
 // VARIABLES GLOBALES
 // ========================================
@@ -27,6 +44,7 @@ let scene, camera, renderer;
 let player;
 let platforms = [];
 let movingPlatforms = [];
+let enemies = [];
 let collectibles = [];
 let goalObject = null;
 let keys = {};
@@ -53,6 +71,12 @@ const LEVELS = {
             { x: 8, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'horizontal', speed: 1, range: 3 },
             { x: 16, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'vertical', speed: 1.5, range: 2 },
             { x: 24, y: 2, z: 0, w: 4, h: 1, d: 4, type: 'circular', speed: 0.8, range: 3 }
+        ],
+        enemies: [
+            { x: 12, y: 2, z: 0, type: 'static' },
+            { x: 20, y: 1, z: 0, type: 'patrol', range: 4, speed: 1.5 },
+            { x: 28, y: 4, z: 0, type: 'flying', range: 3, speed: 1, height: 2 },
+            { x: 38, y: 2, z: 0, type: 'chaser', speed: 3, chaseRadius: 10 }
         ],
         collectibles: [
             { x: 12, y: 2, z: 0 },
@@ -283,6 +307,225 @@ function createMovingPlatform(x, y, z, w, h, d, config) {
 }
 
 // ========================================
+// ENNEMIS
+// ========================================
+
+class Enemy {
+    constructor(x, y, z, type, config = {}) {
+        this.type = type;
+        this.startPos = new THREE.Vector3(x, y, z);
+        this.isActive = true;
+        this.time = 0;
+        this.direction = 1;
+
+        this.config = {
+            speed: config.speed || 2,
+            range: config.range || 5,
+            height: config.height || 2,
+            chaseRadius: config.chaseRadius || 15,
+            ...config
+        };
+
+        this.createMesh();
+    }
+
+    createMesh() {
+        const size = ENEMY_SIZES[this.type] || 0.5;
+        const geometry = new THREE.SphereGeometry(size, 16, 16);
+        const material = new THREE.MeshStandardMaterial({
+            color: ENEMY_COLORS[this.type] || 0xff0000,
+            emissive: ENEMY_COLORS[this.type] || 0xff0000,
+            emissiveIntensity: 0.3,
+            roughness: 0.4,
+            metalness: 0.6
+        });
+
+        this.mesh = new THREE.Mesh(geometry, material);
+        this.mesh.position.copy(this.startPos);
+        this.mesh.castShadow = true;
+        this.mesh.userData.enemy = this;
+
+        scene.add(this.mesh);
+
+        this.createDirectionIndicator();
+    }
+
+    createDirectionIndicator() {
+        if (this.type === 'patrol' || this.type === 'chaser') {
+            const coneGeometry = new THREE.ConeGeometry(0.15, 0.3, 8);
+            const coneMaterial = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                emissive: 0xffffff,
+                emissiveIntensity: 0.5
+            });
+
+            this.directionIndicator = new THREE.Mesh(coneGeometry, coneMaterial);
+            this.directionIndicator.rotation.x = Math.PI / 2;
+            this.directionIndicator.position.set(0, 0, 0.3);
+            this.mesh.add(this.directionIndicator);
+        }
+    }
+
+    update(dt) {
+        if (!this.isActive) return;
+
+        this.time += dt;
+
+        switch(this.type) {
+            case 'static':
+                this.updateStatic(dt);
+                break;
+            case 'patrol':
+                this.updatePatrol(dt);
+                break;
+            case 'flying':
+                this.updateFlying(dt);
+                break;
+            case 'chaser':
+                this.updateChaser(dt);
+                break;
+        }
+
+        this.updateVisuals(dt);
+    }
+
+    updateVisuals(dt) {
+        // Rotation continue
+        this.mesh.rotation.y += dt * 2;
+
+        // Pulsation d'intensité émissive
+        const pulse = Math.sin(this.time * 3) * 0.15 + 0.3;
+        this.mesh.material.emissiveIntensity = pulse;
+    }
+
+    updateStatic(dt) {
+        // Flottement vertical
+        const bobbing = Math.sin(this.time * 2) * 0.15;
+        this.mesh.position.y = this.startPos.y + bobbing;
+        this.mesh.position.x = this.startPos.x;
+        this.mesh.position.z = this.startPos.z;
+    }
+
+    updatePatrol(dt) {
+        // Mouvement horizontal sinusoïdal
+        const offset = Math.sin(this.time * this.config.speed) * this.config.range;
+        this.mesh.position.x = this.startPos.x + offset;
+        this.mesh.position.y = this.startPos.y;
+        this.mesh.position.z = this.startPos.z;
+
+        // Orienter l'indicateur
+        if (this.directionIndicator) {
+            const currentDirection = Math.cos(this.time * this.config.speed);
+            if (currentDirection > 0.1) {
+                this.directionIndicator.rotation.y = -Math.PI / 2;
+            } else if (currentDirection < -0.1) {
+                this.directionIndicator.rotation.y = Math.PI / 2;
+            }
+        }
+    }
+
+    updateFlying(dt) {
+        // Mouvement circulaire + variation hauteur
+        const angle = this.time * this.config.speed;
+        this.mesh.position.x = this.startPos.x + Math.cos(angle) * this.config.range;
+        this.mesh.position.z = this.startPos.z + Math.sin(angle) * this.config.range;
+
+        const heightVariation = Math.sin(this.time * 1.5) * this.config.height;
+        this.mesh.position.y = this.startPos.y + heightVariation;
+
+        // Inclinaison
+        this.mesh.rotation.z = Math.sin(angle) * 0.2;
+        this.mesh.rotation.x = Math.cos(angle) * 0.2;
+    }
+
+    updateChaser(dt) {
+        if (!player) return;
+
+        const playerWorldPos = new THREE.Vector3();
+        player.mesh.getWorldPosition(playerWorldPos);
+
+        const direction = new THREE.Vector3()
+            .subVectors(playerWorldPos, this.mesh.position)
+            .normalize();
+
+        const distanceToPlayer = this.mesh.position.distanceTo(playerWorldPos);
+
+        if (distanceToPlayer < this.config.chaseRadius) {
+            // Poursuivre
+            this.mesh.position.x += direction.x * this.config.speed * dt;
+            this.mesh.position.z += direction.z * this.config.speed * dt;
+            this.mesh.position.y = this.startPos.y;
+
+            // Orienter indicateur
+            if (this.directionIndicator) {
+                const angleToPlayer = Math.atan2(direction.z, direction.x);
+                this.directionIndicator.rotation.y = -angleToPlayer;
+            }
+        } else {
+            // Retourner à la position de départ
+            const returnDirection = new THREE.Vector3()
+                .subVectors(this.startPos, this.mesh.position)
+                .normalize();
+
+            this.mesh.position.x += returnDirection.x * this.config.speed * 0.5 * dt;
+            this.mesh.position.z += returnDirection.z * this.config.speed * 0.5 * dt;
+            this.mesh.position.y = this.startPos.y;
+        }
+    }
+
+    checkCollisionWithPlayer() {
+        if (!this.isActive || !player) return false;
+
+        const playerWorldPos = new THREE.Vector3();
+        player.mesh.getWorldPosition(playerWorldPos);
+
+        const distance = this.mesh.position.distanceTo(playerWorldPos);
+        return distance < ENEMY_COLLISION_RADIUS;
+    }
+
+    destroy() {
+        this.isActive = false;
+
+        if (this.directionIndicator) {
+            this.mesh.remove(this.directionIndicator);
+            this.directionIndicator.geometry.dispose();
+            this.directionIndicator.material.dispose();
+        }
+
+        scene.remove(this.mesh);
+        this.mesh.geometry.dispose();
+        this.mesh.material.dispose();
+    }
+}
+
+function createEnemy(x, y, z, type, config) {
+    const enemy = new Enemy(x, y, z, type, config);
+    enemies.push(enemy);
+    return enemy;
+}
+
+function updateEnemies(dt) {
+    enemies.forEach(enemy => {
+        enemy.update(dt);
+
+        if (enemy.checkCollisionWithPlayer()) {
+            handlePlayerDeath();
+        }
+    });
+}
+
+function handlePlayerDeath() {
+    console.log('💀 Mort! Contact avec un ennemi');
+
+    player.mesh.visible = false;
+
+    setTimeout(() => {
+        player.mesh.visible = true;
+        resetLevel();
+    }, 1000);
+}
+
+// ========================================
 // GESTION DE NIVEAU
 // ========================================
 function loadLevel(levelName) {
@@ -316,6 +559,18 @@ function loadLevel(levelName) {
         });
     }
 
+    // Charger les ennemis
+    if (data.enemies) {
+        data.enemies.forEach(e => {
+            createEnemy(e.x, e.y, e.z, e.type, {
+                speed: e.speed,
+                range: e.range,
+                height: e.height,
+                chaseRadius: e.chaseRadius
+            });
+        });
+    }
+
     // Charger les collectibles
     data.collectibles.forEach(c => {
         createCollectible(c.x, c.y, c.z);
@@ -345,6 +600,10 @@ function clearLevel() {
     // Retirer tous les collectibles
     collectibles.forEach(c => scene.remove(c));
     collectibles = [];
+
+    // Retirer tous les ennemis
+    enemies.forEach(enemy => enemy.destroy());
+    enemies = [];
 
     // Retirer l'objectif
     if (goalObject) {
@@ -878,6 +1137,7 @@ function update(dt) {
     applyPhysics(dt);
     checkCollisions();
     updateCollectibles(dt);
+    updateEnemies(dt);
     updateGoal(dt);
     updateCamera();
     debugPlayer();
