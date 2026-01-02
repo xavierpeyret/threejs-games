@@ -1,6 +1,7 @@
 import './style.scss';
 import * as THREE from 'three';
 import gsap from 'gsap';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // ========================================
 // CONSTANTES
@@ -55,6 +56,8 @@ let totalCollectibles = 0;
 let collectedCount = 0;
 let debugFrameCount = 0;
 let debugMode = false;
+let editorMode = false; // Mode éditeur activé par défaut
+let orbitControls = null;
 
 // ========================================
 // DONNÉES DES NIVEAUX
@@ -162,7 +165,9 @@ function setupThreeJS() {
         0.1,
         1000
     );
-    camera.position.set(0, 5, 10);
+
+    // Position initiale de la caméra selon le mode
+    camera.position.set(0, 5, 10); // Vue du joueur
 
     renderer = new THREE.WebGLRenderer({
         antialias: true,
@@ -171,6 +176,24 @@ function setupThreeJS() {
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
+
+
+
+    // En mode éditeur, pointer vers le centre de la scène
+    if (editorMode) {
+        camera.position.set(20, 10, 10); // Vue d'ensemble pour l'édition
+        // Configurer OrbitControls pour le mode éditeur
+        orbitControls = new OrbitControls(camera, renderer.domElement);
+        orbitControls.enableDamping = true;
+        orbitControls.dampingFactor = 0.05;
+        orbitControls.screenSpacePanning = false;
+        orbitControls.minDistance = 3;
+        orbitControls.maxDistance = 150;
+        orbitControls.maxPolarAngle = Math.PI / 2;
+        orbitControls.enabled = editorMode; // Activé selon editorMode
+        orbitControls.target.set(20, 0, 0); // Centre approximatif du niveau
+        orbitControls.update();
+    }
 
     clock = new THREE.Clock();
 
@@ -1105,14 +1128,20 @@ function debugPlayer() {
 // CAMÉRA
 // ========================================
 function updateCamera() {
+    // En mode éditeur, OrbitControls gère la caméra
+    if (editorMode) {
+        orbitControls.update();
+        return;
+    }
+
     // Toujours utiliser la position mondiale du joueur pour la caméra
     const playerWorldPos = new THREE.Vector3();
     player.mesh.getWorldPosition(playerWorldPos);
 
     const targetPosition = new THREE.Vector3(
-        playerWorldPos.x,
+        playerWorldPos.x - 1,
         playerWorldPos.y + 5,
-        playerWorldPos.z + 50
+        playerWorldPos.z + 10
     );
 
     camera.position.lerp(targetPosition, 0.1);
@@ -1139,8 +1168,9 @@ function update(dt) {
     updateCollectibles(dt);
     updateEnemies(dt);
     updateGoal(dt);
-    updateCamera();
     debugPlayer();
+    // La caméra se met à jour dans tous les cas (gère OrbitControls en mode éditeur)
+    updateCamera();
 }
 
 function render() {
