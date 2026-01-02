@@ -34,6 +34,11 @@ const LEVELS = {
             { x: 37, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
             { x: 42, y: 0, z: 0, w: 12, h: 1, d: 12, type: 'goal' }
         ],
+        movingPlatforms: [
+            { x: 8, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'horizontal', speed: 1, range: 3 },
+            { x: 16, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'vertical', speed: 1.5, range: 2 },
+            { x: 24, y: 2, z: 0, w: 4, h: 1, d: 4, type: 'circular', speed: 0.8, range: 3 }
+        ],
         collectibles: [
             { x: 12, y: 2, z: 0 },
             { x: 20, y: 4, z: 0 },
@@ -95,6 +100,7 @@ const LEVEL_ORDER = ['tutorial', 'level1', 'level2'];
 let scene, camera, renderer;
 let player;
 let platforms = [];
+let movingPlatforms = [];
 let collectibles = [];
 let goalObject = null;
 let keys = {};
@@ -246,6 +252,37 @@ function createGoal(x, y, z) {
     return goal;
 }
 
+function createMovingPlatform(x, y, z, w, h, d, config) {
+    const geometry = new THREE.BoxGeometry(w, h, d);
+    const material = new THREE.MeshStandardMaterial({
+        color: 0xff6b9d,  // Rose pour identifier
+        roughness: 0.7,
+        metalness: 0.3
+    });
+
+    const platform = new THREE.Mesh(geometry, material);
+    platform.position.set(x, y, z);
+    platform.receiveShadow = true;
+    platform.castShadow = true;
+
+    // Données pour le mouvement
+    platform.userData = {
+        isMoving: true,
+        type: config.type || 'horizontal',
+        speed: config.speed || 2,
+        range: config.range || 5,
+        startPos: new THREE.Vector3(x, y, z),
+        direction: 1,  // 1 ou -1
+        time: 0
+    };
+
+    scene.add(platform);
+    platforms.push(platform);
+    movingPlatforms.push(platform);
+
+    return platform;
+}
+
 // ========================================
 // GESTION DE NIVEAU
 // ========================================
@@ -268,6 +305,17 @@ function loadLevel(levelName) {
     data.platforms.forEach(p => {
         createPlatform(p.x, p.y, p.z, p.w, p.h, p.d, p.type);
     });
+
+    // Charger les plateformes mobiles
+    if (data.movingPlatforms) {
+        data.movingPlatforms.forEach(p => {
+            createMovingPlatform(p.x, p.y, p.z, p.w, p.h, p.d, {
+                type: p.type,
+                speed: p.speed,
+                range: p.range
+            });
+        });
+    }
 
     // Charger les collectibles
     data.collectibles.forEach(c => {
@@ -293,6 +341,7 @@ function clearLevel() {
     // Retirer toutes les plateformes
     platforms.forEach(p => scene.remove(p));
     platforms = [];
+    movingPlatforms = [];
 
     // Retirer tous les collectibles
     collectibles.forEach(c => scene.remove(c));
@@ -436,6 +485,7 @@ function applyPhysics(dt) {
 // ========================================
 function checkCollisions() {
     player.isGrounded = false;
+    let standingOnPlatform = null;
 
     const playerBox = new THREE.Box3().setFromObject(player.mesh);
 
@@ -447,9 +497,36 @@ function checkCollisions() {
                 player.mesh.position.y = platformBox.max.y + PLAYER_SIZE / 2;
                 player.velocity.y = 0;
                 player.isGrounded = true;
+
+                // Retenir sur quelle plateforme on est
+                standingOnPlatform = platform;
             }
         }
     });
+
+    // Déplacer le joueur avec la plateforme mobile
+    if (standingOnPlatform && standingOnPlatform.userData.isMoving) {
+        const data = standingOnPlatform.userData;
+
+        if (data.type === 'horizontal') {
+            const velocity = Math.cos(data.time * data.speed) * data.speed * data.range;
+            player.mesh.position.x += velocity * clock.getDelta();
+
+        } else if (data.type === 'vertical') {
+            const velocity = Math.cos(data.time * data.speed) * data.speed * data.range;
+            player.mesh.position.y += velocity * clock.getDelta();
+
+        } else if (data.type === 'circular') {
+            const angle = data.time * data.speed;
+            const prevAngle = (data.time - clock.getDelta()) * data.speed;
+
+            const dx = (Math.cos(angle) - Math.cos(prevAngle)) * data.range;
+            const dz = (Math.sin(angle) - Math.sin(prevAngle)) * data.range;
+
+            player.mesh.position.x += dx;
+            player.mesh.position.z += dz;
+        }
+    }
 
     // Vérifier collision avec l'objectif
     if (goalObject) {
@@ -501,6 +578,33 @@ function updateCollectibles(dt) {
 }
 
 // ========================================
+// UPDATE MOVING PLATFORMS
+// ========================================
+function updateMovingPlatforms(dt) {
+    movingPlatforms.forEach(platform => {
+        const data = platform.userData;
+        data.time += dt;
+
+        if (data.type === 'horizontal') {
+            // Mouvement horizontal (axe X)
+            const offset = Math.sin(data.time * data.speed) * data.range;
+            platform.position.x = data.startPos.x + offset;
+
+        } else if (data.type === 'vertical') {
+            // Mouvement vertical (axe Y)
+            const offset = Math.sin(data.time * data.speed) * data.range;
+            platform.position.y = data.startPos.y + offset;
+
+        } else if (data.type === 'circular') {
+            // Mouvement circulaire
+            const angle = data.time * data.speed;
+            platform.position.x = data.startPos.x + Math.cos(angle) * data.range;
+            platform.position.z = data.startPos.z + Math.sin(angle) * data.range;
+        }
+    });
+}
+
+// ========================================
 // UPDATE GOAL (Animation)
 // ========================================
 function updateGoal(dt) {
@@ -541,6 +645,7 @@ function update(dt) {
     applyPhysics(dt);
     checkCollisions();
     updateCollectibles(dt);
+    updateMovingPlatforms(dt);
     updateGoal(dt);
     updateCamera();
 }
