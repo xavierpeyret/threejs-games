@@ -118,17 +118,76 @@ The entire game logic is contained in `main.js` with a functional/procedural app
       - `circular`: Circular movement on X-Z plane
     - Platform data stored in `userData`: type, speed, range, startPos, time
 
-11. **Debug System** (lines 677-701):
+11. **Particle System**:
+    - **Object Pooling Architecture**: Pre-allocates 300 particles (100 per shape) to avoid garbage collection
+    - **Shared Geometries**: Single instances of SphereGeometry, BoxGeometry, ConeGeometry reused by all particles (~95% memory savings)
+    - **Per-Shape Pools**: Separate pools for sphere, box, and cone particles (no shape switching needed)
+    - **Performance Optimizations**:
+      - `MeshBasicMaterial` by default (no lighting calculations)
+      - `MeshStandardMaterial` only for emissive particles (death burst)
+      - Shadows disabled on all particles
+      - `transparent: true` required for fade-out effect
+
+    **Classes**:
+    - `Particle`: Individual particle with lifecycle (activate → update → deactivate → pool)
+      - Fixed shape per particle (sphere, box, or cone)
+      - Physics: velocity, gravity, rotation
+      - Fade-out support with configurable lifetime
+      - Uses shared geometries (never disposed)
+
+    - `ParticleEmitter`: Continuous emission system
+      - Rate-based emission (particles/second)
+      - Can attach to objects (follows position)
+      - Configurable spread, offset, particle properties
+      - Used for player trail effect
+
+    **Key Functions**:
+    - `initParticleGeometries()`: Creates shared geometries (called BEFORE player creation)
+    - `initParticlePool()`: Pre-allocates particle pool (300 particles)
+    - `getParticleFromPool(x, y, z, config)`: Retrieves inactive particle or creates new if exhausted
+    - `updateParticles(dt)`: Updates all active particles, filters out dead ones
+    - `clearParticles()`: Deactivates all particles (called in clearLevel)
+    - `createParticleBurst(x, y, z, count, config)`: Helper for explosion effects
+    - `createEmitter(x, y, z, config)`: Creates continuous emitter
+    - `updateEmitters(dt)`: Updates all active emitters
+    - `clearEmitters()`: Destroys all emitters (called in clearLevel)
+
+    **Particle Presets** (PARTICLE_PRESETS):
+    - `collect`: Yellow spheres (collectible pickup)
+    - `landing`: White boxes (hard landing, velocity < -5)
+    - `death`: Red emissive spheres (player death)
+    - `trail`: Green boxes (player movement trail)
+
+    **Event Bursts**:
+    - **Collectible pickup**: 15 yellow particles burst upward
+    - **Hard landing**: 8 white particles if fall velocity > 5
+    - **Player death**: 30 red emissive particles explosion
+
+    **Player Trail**:
+    - Created in `loadLevel()` after `clearLevel()` (important timing!)
+    - Attaches to player mesh with `attachTo: player.mesh`
+    - Activates when player velocity > 1 and grounded
+    - 30 particles/second emission rate
+    - Green box particles with 2s lifetime, no gravity
+
+    **Important Notes**:
+    - Particle system initialized BEFORE `createPlayer()` (geometries must exist first)
+    - Player trail emitter created in `loadLevel()`, not `createPlayer()` (avoids clearLevel reset)
+    - All particles use world coordinates (not parented to scene graph)
+    - Pool dynamically expands with console warning if exhausted
+    - Particle lifecycle: never destroyed, only reused
+
+12. **Debug System** (lines 677-701):
     - `debugPlayer()` displays player state every 10 seconds when debugMode is active
     - Shows: world position, local position, parent (SCENE/PLATFORM), grounded state, velocity
     - Toggle with **KeyP**
 
-12. **Camera** (lines 703-719):
+13. **Camera** (lines 703-719):
     - Third-person follow camera with lerp smoothing (0.1)
     - **Uses world position** of player (handles local/world coordinate conversion)
     - Positioned at player + (0, 5, 10), looks at player
 
-13. **Game Loop** (lines 854-863):
+14. **Game Loop**:
     - `gameLoop()` uses requestAnimationFrame
     - `update(dt)` calls all system updates with delta time in specific order:
       1. `handleInput(dt)` - Process player input
@@ -136,9 +195,12 @@ The entire game logic is contained in `main.js` with a functional/procedural app
       3. `applyPhysics(dt)` - Apply gravity and velocity
       4. `checkCollisions()` - Detect and resolve collisions
       5. `updateCollectibles(dt)` - Animate and check collectibles
-      6. `updateGoal(dt)` - Animate goal
-      7. `updateCamera()` - Follow player with camera
-      8. `debugPlayer()` - Debug output if enabled
+      6. `updateEnemies(dt)` - Update enemy AI and movement
+      7. `updateParticles(dt)` - Update particle physics and lifetime
+      8. `updateEmitters(dt)` - Emit new particles from active emitters
+      9. `updateGoal(dt)` - Animate goal
+      10. `updateCamera()` - Follow player with camera
+      11. `debugPlayer()` - Debug output if enabled
     - `render()` renders scene
 
 ### Key Implementation Patterns
@@ -178,11 +240,11 @@ The entire game logic is contained in `main.js` with a functional/procedural app
 
 - ~~No moving platforms~~ ✅ Implemented with parent-child system
 - ~~No lateral collision detection~~ ✅ Implemented with multi-directional SAT system
+- ~~No enemy system~~ ✅ Implemented with patrol, chase, and flying enemies
+- ~~No particle effects~~ ✅ Implemented with object pooling and emitters
 - No continuous collision detection (fast-moving objects may tunnel through thin platforms)
 - No ceiling collision handling (jumping into platform from below)
 - AABB-only collision (no support for rotated platforms)
-- No enemy system
-- No particle effects
 - Camera OrbitControls not used (camera is lerp-based follow cam)
 - GSAP imported but unused
 - Jump input requires key release to jump again (canJump flag)
@@ -226,6 +288,13 @@ When adding features:
   - Players on the side get horizontal collision resolution (X or Z axis)
   - All resolution functions automatically handle local vs world coordinates
   - Moving platforms are updated BEFORE physics to ensure accurate lateral collision detection
+- When working with particles:
+  - Particle system must be initialized BEFORE `createPlayer()` (shared geometries needed)
+  - Player trail emitter is created in `loadLevel()`, NOT in `createPlayer()` (timing issue with clearLevel)
+  - Use `getParticleFromPool()` for all particle creation (never `new Particle()` directly)
+  - Particles are never destroyed, only deactivated and returned to pool
+  - Use `PARTICLE_PRESETS` for consistent visual effects
+  - Add particle cleanup to `clearLevel()` and `clearEmitters()` calls
 
 ## Debug Mode
 

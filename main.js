@@ -308,8 +308,6 @@ function createPlayer() {
         canJump: true
     };
 
-    console.log('🎮 Player mesh créé');
-    // Note: Le trail emitter sera créé dans loadLevel() après clearLevel()
 }
 
 // ========================================
@@ -420,7 +418,6 @@ function initParticleGeometries() {
     PARTICLE_GEOMETRIES.sphere = new THREE.SphereGeometry(0.1, 8, 8);
     PARTICLE_GEOMETRIES.box = new THREE.BoxGeometry(0.1, 0.1, 0.1);
     PARTICLE_GEOMETRIES.cone = new THREE.ConeGeometry(0.1, 0.2, 6);
-    console.log('🔷 Particle geometries initialized (shared)');
 }
 
 class Particle {
@@ -551,7 +548,6 @@ function initParticlePool() {
         particlePool.box.push(new Particle('box'));
         particlePool.cone.push(new Particle('cone'));
     }
-    console.log('✨ Particle pools initialized: 300 total (100 per shape)');
 }
 
 function getParticleFromPool(x, y, z, config = {}) {
@@ -639,16 +635,9 @@ class ParticleEmitter {
         this.timeSinceLastEmit += dt;
         const interval = 1 / this.config.rate;
 
-        let emitCount = 0;
         while (this.timeSinceLastEmit >= interval) {
             this.emit();
-            emitCount++;
             this.timeSinceLastEmit -= interval;
-        }
-
-        // DEBUG: Log seulement quand on émet
-        if (emitCount > 0) {
-            console.log('💨 TRAIL EMIT:', emitCount, 'particules | pos:', this.position.x.toFixed(1), this.position.y.toFixed(1), this.position.z.toFixed(1), '| Actives:', particles.length);
         }
     }
 
@@ -713,11 +702,6 @@ function createParticleBurst(x, y, z, count = 10, config = {}) {
     }
 }
 
-// Exposer pour debug
-window.createParticleBurst = createParticleBurst;
-window.playerTrailEmitter = () => playerTrailEmitter;  // Fonction pour accéder à la variable
-window.particles = particles;
-window.emitters = emitters;
 
 // ========================================
 // ENNEMIS
@@ -1014,11 +998,10 @@ function loadLevel(levelName) {
 
     // Créer/recréer l'émetteur de trail du joueur
     if (!playerTrailEmitter) {
-        console.log('🎮 Création du trail emitter du joueur...');
         playerTrailEmitter = createEmitter(0, 0, 0, {
-            rate: 30,  // 30 particules/seconde
+            rate: 30,
             spread: 0.5,
-            active: false,  // Désactivé par défaut
+            active: false,
             attachTo: player.mesh,
             offset: new THREE.Vector3(0, 0, 0),
             particleConfig: {
@@ -1026,7 +1009,6 @@ function loadLevel(levelName) {
                 velocity: new THREE.Vector3(0, 0, 0)
             }
         });
-        console.log('✅ Trail emitter créé:', playerTrailEmitter);
     }
 
     // Créer l'objectif
