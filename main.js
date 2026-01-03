@@ -38,6 +38,56 @@ const ENEMY_SIZES = {
 
 const ENEMY_COLLISION_RADIUS = 1.0;
 
+// Constantes pour les particules
+const PARTICLE_POOL_SIZE = 300;  // 300 total (100 per shape)
+
+// ⚡ SHARED GEOMETRIES (created once, reused by all particles)
+const PARTICLE_GEOMETRIES = {
+    sphere: null,
+    box: null,
+    cone: null
+};
+
+// Presets pour les différents types de particules
+const PARTICLE_PRESETS = {
+    collect: {
+        color: 0xffd700,  // Or
+        size: 0.12,
+        lifetime: 0.8,
+        gravity: -8,
+        velocityRange: 4,
+        shape: 'sphere'
+    },
+
+    landing: {
+        color: 0xcccccc,  // Gris (poussière)
+        size: 0.08,
+        lifetime: 0.6,
+        gravity: -12,
+        velocityRange: 3,
+        shape: 'box'
+    },
+
+    death: {
+        color: 0xff0000,  // Rouge
+        size: 0.15,
+        lifetime: 1.2,
+        gravity: -5,
+        velocityRange: 6,
+        shape: 'sphere',
+        emissive: true
+    },
+
+    trail: {
+        color: 0x00ffcc,  // Cyan
+        size: 0.06,
+        lifetime: 0.4,
+        gravity: 0,  // Pas de gravité pour le trail
+        fadeOut: true,
+        shape: 'sphere'
+    }
+};
+
 // ========================================
 // VARIABLES GLOBALES
 // ========================================
@@ -56,10 +106,20 @@ let totalCollectibles = 0;
 let collectedCount = 0;
 let debugFrameCount = 0;
 let debugMode = false;
-let editorMode = true; // Mode éditeur activé par défaut
+let editorMode = false; // Mode éditeur activé par défaut
 let orbitControls = null;
 let raycaster = null;
 let mouse = new THREE.Vector2();
+
+// Particles
+let particles = [];
+let particlePool = {  // Per-shape pools
+    sphere: [],
+    box: [],
+    cone: []
+};
+let emitters = [];
+let playerTrailEmitter = null;  // Trail du joueur
 
 // ========================================
 // DONNÉES DES NIVEAUX
@@ -83,12 +143,12 @@ const LEVELS = {
             { x: 28, y: 4, z: 0, type: 'flying', range: 3, speed: 1, height: 2 },
             { x: 38, y: 2, z: 0, type: 'chaser', speed: 3, chaseRadius: 10 }
         ],
-        collectibles: [
-            { x: 12, y: 2, z: 0 },
-            { x: 20, y: 4, z: 0 },
-            { x: 32, y: 4, z: 0 },
-            { x: 42, y: 3, z: 0 }
-        ],
+        // collectibles: [
+        //     { x: 12, y: 2, z: 0 },
+        //     { x: 20, y: 4, z: 0 },
+        //     { x: 32, y: 4, z: 0 },
+        //     { x: 42, y: 3, z: 0 }
+        // ],
         playerStart: { x: 0, y: 2, z: 0 },
         goal: { x: 42, y: 3, z: 0 }
     },
@@ -148,6 +208,10 @@ function init() {
     setupLevelHelpers();
     setupConsoleHelper();
     setupControls();
+
+    // Initialize particle system
+    initParticleGeometries();  // D'ABORD: créer géométries partagées
+    initParticlePool();         // ENSUITE: créer pool
 
     loadLevel(LEVEL_ORDER[0]);
 
@@ -231,6 +295,19 @@ function createPlayer() {
         isGrounded: false,
         canJump: true
     };
+
+    // Créer l'émetteur de trail du joueur
+    playerTrailEmitter = createEmitter(0, 0, 0, {
+        rate: 15,  // 15 particules/seconde
+        spread: 0.2,
+        active: false,  // Désactivé par défaut
+        attachTo: player.mesh,
+        offset: new THREE.Vector3(0, -PLAYER_SIZE/2, 0),  // Sous le joueur
+        particleConfig: {
+            ...PARTICLE_PRESETS.trail,
+            velocity: new THREE.Vector3(0, 0.5, 0)  // Monte légèrement
+        }
+    });
 }
 
 // ========================================
@@ -331,6 +408,300 @@ function createMovingPlatform(x, y, z, w, h, d, config) {
     movingPlatforms.push(platform);
 
     return platform;
+}
+
+// ========================================
+// PARTICLE SYSTEM
+// ========================================
+
+function initParticleGeometries() {
+    PARTICLE_GEOMETRIES.sphere = new THREE.SphereGeometry(0.1, 8, 8);
+    PARTICLE_GEOMETRIES.box = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+    PARTICLE_GEOMETRIES.cone = new THREE.ConeGeometry(0.1, 0.2, 6);
+    console.log('🔷 Particle geometries initialized (shared)');
+}
+
+class Particle {
+    constructor(shape = 'sphere') {
+        this.shape = shape; // Forme fixe (per-shape pool)
+        this.mesh = null;
+        this.config = {};
+        this.velocity = new THREE.Vector3();
+        this.lifetime = 1.0;
+        this.age = 0;
+        this.isActive = false;
+    }
+
+    createMesh() {
+        // Use SHARED geometry (never dispose!)
+        const geometry = PARTICLE_GEOMETRIES[this.shape];
+
+        const material = this.config.emissive
+            ? new THREE.MeshStandardMaterial({
+                  color: this.config.color,
+                  emissive: this.config.color,
+                  emissiveIntensity: 0.8,
+                  transparent: true  // IMPORTANT
+              })
+            : new THREE.MeshBasicMaterial({
+                  color: this.config.color,
+                  transparent: true  // IMPORTANT pour fade-out
+              });
+
+        this.mesh = new THREE.Mesh(geometry, material);
+        this.mesh.castShadow = false;    // Performance
+        this.mesh.receiveShadow = false; // Performance
+        this.mesh.visible = false;
+
+        scene.add(this.mesh);
+    }
+
+    activate(x, y, z, config = {}) {
+        this.isActive = true;
+        this.age = 0;
+
+        this.config = {
+            velocity: config.velocity || new THREE.Vector3(0, 0, 0),
+            color: config.color || 0xffffff,
+            size: config.size || 0.1,
+            lifetime: config.lifetime || 1.0,
+            gravity: config.gravity !== undefined ? config.gravity : -10,
+            fadeOut: config.fadeOut !== undefined ? config.fadeOut : true,
+            rotation: config.rotation || false,
+            emissive: config.emissive || false
+        };
+
+        this.velocity.copy(this.config.velocity);
+        this.lifetime = this.config.lifetime;
+
+        if (!this.mesh) {
+            this.createMesh();
+        }
+
+        // Update mesh properties
+        this.mesh.position.set(x, y, z);
+        this.mesh.material.color.setHex(this.config.color);
+        if (this.mesh.material.emissive) {
+            this.mesh.material.emissive.setHex(this.config.color);
+        }
+        this.mesh.material.opacity = 1;
+
+        const scale = this.config.size / 0.1;
+        this.mesh.scale.set(scale, scale, scale);
+
+        this.mesh.visible = true;
+    }
+
+    update(dt) {
+        if (!this.isActive) return;
+
+        // Apply gravity
+        this.velocity.y += this.config.gravity * dt;
+
+        // Apply velocity
+        this.mesh.position.x += this.velocity.x * dt;
+        this.mesh.position.y += this.velocity.y * dt;
+        this.mesh.position.z += this.velocity.z * dt;
+
+        // Rotation
+        if (this.config.rotation) {
+            this.mesh.rotation.x += 5 * dt;
+            this.mesh.rotation.y += 5 * dt;
+        }
+
+        // Age and fade
+        this.age += dt;
+
+        if (this.config.fadeOut) {
+            const alpha = Math.max(0, 1 - (this.age / this.lifetime));
+            this.mesh.material.opacity = alpha;
+        }
+
+        // Deactivate if lifetime exceeded
+        if (this.age >= this.lifetime) {
+            this.deactivate();
+        }
+    }
+
+    deactivate() {
+        this.isActive = false;
+        if (this.mesh) {
+            this.mesh.visible = false;
+        }
+    }
+
+    destroy() {
+        this.isActive = false;
+        if (this.mesh) {
+            // Dispose material but NOT geometry (shared!)
+            this.mesh.material.dispose();
+            scene.remove(this.mesh);
+            this.mesh = null;
+        }
+    }
+}
+
+// Object Pooling Functions
+function initParticlePool() {
+    // Créer 100 de chaque forme
+    for (let i = 0; i < 100; i++) {
+        particlePool.sphere.push(new Particle('sphere'));
+        particlePool.box.push(new Particle('box'));
+        particlePool.cone.push(new Particle('cone'));
+    }
+    console.log('✨ Particle pools initialized: 300 total (100 per shape)');
+}
+
+function getParticleFromPool(x, y, z, config = {}) {
+    const shape = config.shape || 'sphere';
+    const pool = particlePool[shape];
+
+    if (!pool) {
+        console.error(`Unknown particle shape: ${shape}`);
+        return null;
+    }
+
+    // Chercher une particule inactive
+    let particle = pool.find(p => !p.isActive);
+
+    // Si aucune disponible, créer dynamiquement
+    if (!particle) {
+        particle = new Particle(shape);
+        pool.push(particle);
+        console.warn(`Particle pool exhausted (${shape}), creating new particle`);
+    }
+
+    // Activer la particule
+    particle.activate(x, y, z, config);
+
+    // Ajouter aux particules actives
+    if (!particles.includes(particle)) {
+        particles.push(particle);
+    }
+
+    return particle;
+}
+
+function updateParticles(dt) {
+    particles.forEach(particle => {
+        particle.update(dt);
+    });
+
+    // Nettoyer les particules désactivées (retour au pool)
+    particles = particles.filter(p => p.isActive);
+}
+
+function clearParticles() {
+    // Désactiver toutes les particules actives
+    particles.forEach(p => p.deactivate());
+    particles = [];
+}
+
+// Particle Emitter Class
+class ParticleEmitter {
+    constructor(x, y, z, config = {}) {
+        this.position = new THREE.Vector3(x, y, z);
+
+        this.config = {
+            rate: config.rate || 5,           // Particules/seconde
+            spread: config.spread || 0.5,     // Rayon d'émission
+            active: config.active !== undefined ? config.active : true,
+            attachTo: config.attachTo || null,  // Objet à suivre (ex: player.mesh)
+            offset: config.offset || new THREE.Vector3(0, 0, 0),  // Offset si attaché
+
+            // Config des particules émises
+            particleConfig: config.particleConfig || {
+                color: 0xffffff,
+                size: 0.1,
+                lifetime: 1.0,
+                velocity: new THREE.Vector3(0, 1, 0),
+                gravity: -5
+            }
+        };
+
+        this.timeSinceLastEmit = 0;
+        this.isActive = true;
+    }
+
+    update(dt) {
+        if (!this.isActive || !this.config.active) return;
+
+        // Si attaché à un objet, suivre sa position
+        if (this.config.attachTo) {
+            const worldPos = new THREE.Vector3();
+            this.config.attachTo.getWorldPosition(worldPos);
+            this.position.copy(worldPos).add(this.config.offset);
+        }
+
+        // Émettre selon le rate
+        this.timeSinceLastEmit += dt;
+        const interval = 1 / this.config.rate;
+
+        while (this.timeSinceLastEmit >= interval) {
+            this.emit();
+            this.timeSinceLastEmit -= interval;
+        }
+    }
+
+    emit() {
+        // Position aléatoire dans le spread
+        const x = this.position.x + (Math.random() - 0.5) * this.config.spread;
+        const y = this.position.y + (Math.random() - 0.5) * this.config.spread;
+        const z = this.position.z + (Math.random() - 0.5) * this.config.spread;
+
+        // Créer la particule
+        getParticleFromPool(x, y, z, this.config.particleConfig);
+    }
+
+    destroy() {
+        this.isActive = false;
+    }
+}
+
+// Emitter Functions
+function createEmitter(x, y, z, config = {}) {
+    const emitter = new ParticleEmitter(x, y, z, config);
+    emitters.push(emitter);
+    return emitter;
+}
+
+function updateEmitters(dt) {
+    emitters.forEach(emitter => {
+        emitter.update(dt);
+    });
+}
+
+function clearEmitters() {
+    emitters.forEach(e => e.destroy());
+    emitters = [];
+}
+
+// Helper Function for Bursts
+function createParticleBurst(x, y, z, count = 10, config = {}) {
+    const defaults = {
+        color: 0xffffff,
+        size: 0.1,
+        lifetime: 1.0,
+        gravity: -10,
+        fadeOut: true,
+        velocityRange: 5  // Vitesse maximale aléatoire
+    };
+
+    const finalConfig = { ...defaults, ...config };
+
+    for (let i = 0; i < count; i++) {
+        // Vélocité aléatoire
+        const velocity = new THREE.Vector3(
+            (Math.random() - 0.5) * finalConfig.velocityRange,
+            Math.random() * finalConfig.velocityRange * 0.5 + 2,
+            (Math.random() - 0.5) * finalConfig.velocityRange
+        );
+
+        getParticleFromPool(x, y, z, {
+            ...finalConfig,
+            velocity: velocity
+        });
+    }
 }
 
 // ========================================
@@ -544,6 +915,19 @@ function updateEnemies(dt) {
 function handlePlayerDeath() {
     console.log('💀 Mort! Contact avec un ennemi');
 
+    // Obtenir la position mondiale du joueur
+    const playerWorldPos = new THREE.Vector3();
+    player.mesh.getWorldPosition(playerWorldPos);
+
+    // Explosion de particules rouges
+    createParticleBurst(
+        playerWorldPos.x,
+        playerWorldPos.y,
+        playerWorldPos.z,
+        30,  // 30 particules
+        PARTICLE_PRESETS.death
+    );
+
     player.mesh.visible = false;
 
     setTimeout(() => {
@@ -564,7 +948,7 @@ function loadLevel(levelName) {
     // Reset score et compteurs
     score = 0;
     collectedCount = 0;
-    totalCollectibles = data.collectibles.length;
+    totalCollectibles = data.collectibles ? data.collectibles.length : 0;
 
     console.log('========================================');
     console.log('Chargement:', data.name);
@@ -599,9 +983,11 @@ function loadLevel(levelName) {
     }
 
     // Charger les collectibles
-    data.collectibles.forEach(c => {
-        createCollectible(c.x, c.y, c.z);
-    });
+    if (data.collectibles) {
+        data.collectibles.forEach(c => {
+            createCollectible(c.x, c.y, c.z);
+        });
+    }
 
     // Positionner le joueur
     player.mesh.position.set(
@@ -639,6 +1025,13 @@ function clearLevel() {
     // Retirer tous les ennemis
     enemies.forEach(enemy => enemy.destroy());
     enemies = [];
+
+    // Retirer toutes les particules et émetteurs
+    clearParticles();
+    clearEmitters();
+
+    // Réinitialiser la référence au trail du joueur
+    playerTrailEmitter = null;  // Sera recréé avec le joueur
 
     // Retirer l'objectif
     if (goalObject) {
@@ -937,6 +1330,13 @@ function handleInput(dt) {
     if (!keys['Space'] && !keys['ArrowUp'] && !keys['KeyW'] && !keys['KeyZ']) {
         player.canJump = true;
     }
+
+    // Activer/désactiver le trail selon la vélocité
+    if (playerTrailEmitter) {
+        const actualSpeed = Math.sqrt(player.velocity.x ** 2 + player.velocity.z ** 2);
+        const isMovingFast = actualSpeed > 1; // Seuil de vitesse
+        playerTrailEmitter.config.active = isMovingFast && player.isGrounded;
+    }
 }
 
 // ========================================
@@ -1012,6 +1412,17 @@ function resolveVerticalCollision(platform, platformBox, playerWorldPos) {
 
     if (!isAbove) {
         return false; // Pas une collision verticale valide
+    }
+
+    // Burst de particules si chute rapide (avant de reset velocity)
+    if (player.velocity.y < -5) {
+        createParticleBurst(
+            playerWorldPos.x,
+            platformBox.max.y,
+            playerWorldPos.z,
+            8,  // 8 particules
+            PARTICLE_PRESETS.landing
+        );
     }
 
     player.velocity.y = 0;
@@ -1218,6 +1629,15 @@ function updateCollectibles(dt) {
                 // Mettre à jour le HUD
                 updateHUD();
 
+                // Burst de particules dorées
+                createParticleBurst(
+                    item.position.x,
+                    item.position.y,
+                    item.position.z,
+                    15,  // 15 particules
+                    PARTICLE_PRESETS.collect
+                );
+
                 console.log('⭐ Collectible! Score:', score);
             }
         }
@@ -1331,10 +1751,14 @@ function update(dt) {
         checkCollisions();
         updateCollectibles(dt);
         updateEnemies(dt);
+        updateParticles(dt);     // Mettre à jour les particules
+        updateEmitters(dt);      // Mettre à jour les émetteurs
         updateGoal(dt);
         debugPlayer();
     } else {
         updateMovingPlatforms(dt);
+        updateParticles(dt);     // Particules visibles en mode éditeur
+        updateEmitters(dt);      // Émetteurs visibles en mode éditeur
     }
     // La caméra se met à jour dans tous les cas (gère OrbitControls en mode éditeur)
     updateCamera();
