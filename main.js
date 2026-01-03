@@ -51,27 +51,29 @@ const PARTICLE_GEOMETRIES = {
 // Presets pour les différents types de particules
 const PARTICLE_PRESETS = {
     collect: {
-        color: 0xffd700,  // Or
-        size: 0.12,
-        lifetime: 0.8,
+        color: 0xffff00,  // Jaune vif (au lieu de doré)
+        size: 0.5,        // Plus gros (était 0.12)
+        lifetime: 1.5,    // Plus long
         gravity: -8,
         velocityRange: 4,
-        shape: 'sphere'
+        shape: 'sphere',
+        emissive: true    // Ajout d'émissivité pour briller
     },
 
     landing: {
-        color: 0xcccccc,  // Gris (poussière)
-        size: 0.08,
-        lifetime: 0.6,
+        color: 0xffffff,  // Blanc (au lieu de gris)
+        size: 0.5,        // Plus gros (était 0.5)
+        lifetime: 1.0,    // Plus long
         gravity: -12,
         velocityRange: 3,
-        shape: 'box'
+        shape: 'box',
+        emissive: true    // Ajout d'émissivité
     },
 
     death: {
         color: 0xff0000,  // Rouge
-        size: 0.15,
-        lifetime: 1.2,
+        size: 0.1,        // Plus gros (était 0.15)
+        lifetime: 1.5,    // Plus long
         gravity: -5,
         velocityRange: 6,
         shape: 'sphere',
@@ -79,12 +81,13 @@ const PARTICLE_PRESETS = {
     },
 
     trail: {
-        color: 0x00ffcc,  // Cyan
-        size: 0.06,
-        lifetime: 0.4,
-        gravity: 0,  // Pas de gravité pour le trail
+        color: 0x00ff00,  // Vert vif (au lieu de cyan)
+        size: 1.0,        // BEAUCOUP plus gros (était 0.2)
+        lifetime: 2.0,    // Plus long (était 1)
+        gravity: 0,       // Pas de gravité pour le trail
         fadeOut: true,
-        shape: 'sphere'
+        shape: 'box',
+        emissive: true    // Ajout d'émissivité pour briller
     }
 };
 
@@ -121,6 +124,8 @@ let particlePool = {  // Per-shape pools
 let emitters = [];
 let playerTrailEmitter = null;  // Trail du joueur
 
+
+
 // ========================================
 // DONNÉES DES NIVEAUX
 // ========================================
@@ -128,14 +133,20 @@ const LEVELS = {
     tutorial: {
         name: "Tutoriel",
         platforms: [
-            { x: 0,  y: 0, z: 0, w: 10, h: 1, d: 5, type: 'start' },
-            { x: 32, y: 2, z: 0, w: 3,  h: 1, d: 3,  type: 'rhythm' },
+            { x: 0,  y: 0, z: 0, w: 12, h: 1, d: 5, type: 'start' },
+            { x: 12, y: 0, z: 0, w: 6,  h: 1, d: 3,  type: 'rhythm' },
+            { x: 18, y: 2, z: 0, w: 2,  h: 1, d: 3,  type: 'rhythm' },
+            { x: 20, y: 4, z: 0, w: 2,  h: 1, d: 3,  type: 'rhythm' },
+            { x: 22, y: 6, z: 0, w: 2,  h: 1, d: 3,  type: 'rhythm' },
+            { x: 30, y: 6, z: 0, w: 12,  h: 1, d: 3,  type: 'rhythm' },
+            { x: 12, y: 0, z: 0, w: 4,  h: 1, d: 3,  type: 'rhythm' },
+
             { x: 100, y: 0, z: 0, w: 12, h: 1, d: 5, type: 'goal' }
         ],
         movingPlatforms: [
-            { x: 8, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'horizontal', speed: 1, range: 3 },
-            { x: 16, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'vertical', speed: 1.5, range: 2 },
-            { x: 24, y: 2, z: 0, w: 4, h: 1, d: 4, type: 'circular', speed: 0.8, range: 3 }
+            { x: 26, y: 6, z: 0, w: 2, h: 1, d: 3, type: 'vertical', speed: 1.5, range: 3 },
+            // { x: 8, y: 1, z: 0, w: 4, h: 1, d: 4, type: 'horizontal', speed: 1, range: 3 },
+            // { x: 24, y: 2, z: 0, w: 4, h: 1, d: 4, type: 'circular', speed: 0.8, range: 3 }
         ],
         enemies: [
             { x: 12, y: 2, z: 0, type: 'static' },
@@ -203,15 +214,16 @@ const LEVEL_ORDER = ['tutorial', 'level1', 'level2'];
 // ========================================
 function init() {
     setupThreeJS();
-    createPlayer();
+
+    // Initialize particle system BEFORE creating player (trail emitter needs geometries!)
+    initParticleGeometries();  // D'ABORD: créer géométries partagées
+    initParticlePool();         // ENSUITE: créer pool
+
+    createPlayer();  // Maintenant le trail emitter peut utiliser les géométries
     setupLights();
     setupLevelHelpers();
     setupConsoleHelper();
     setupControls();
-
-    // Initialize particle system
-    initParticleGeometries();  // D'ABORD: créer géométries partagées
-    initParticlePool();         // ENSUITE: créer pool
 
     loadLevel(LEVEL_ORDER[0]);
 
@@ -296,18 +308,8 @@ function createPlayer() {
         canJump: true
     };
 
-    // Créer l'émetteur de trail du joueur
-    playerTrailEmitter = createEmitter(0, 0, 0, {
-        rate: 15,  // 15 particules/seconde
-        spread: 0.2,
-        active: false,  // Désactivé par défaut
-        attachTo: player.mesh,
-        offset: new THREE.Vector3(0, -PLAYER_SIZE/2, 0),  // Sous le joueur
-        particleConfig: {
-            ...PARTICLE_PRESETS.trail,
-            velocity: new THREE.Vector3(0, 0.5, 0)  // Monte légèrement
-        }
-    });
+    console.log('🎮 Player mesh créé');
+    // Note: Le trail emitter sera créé dans loadLevel() après clearLevel()
 }
 
 // ========================================
@@ -557,7 +559,7 @@ function getParticleFromPool(x, y, z, config = {}) {
     const pool = particlePool[shape];
 
     if (!pool) {
-        console.error(`Unknown particle shape: ${shape}`);
+        console.error(`❌ Unknown particle shape: ${shape}`);
         return null;
     }
 
@@ -566,9 +568,9 @@ function getParticleFromPool(x, y, z, config = {}) {
 
     // Si aucune disponible, créer dynamiquement
     if (!particle) {
+        console.warn(`⚠️ Particle pool exhausted (${shape}), creating new particle`);
         particle = new Particle(shape);
         pool.push(particle);
-        console.warn(`Particle pool exhausted (${shape}), creating new particle`);
     }
 
     // Activer la particule
@@ -637,9 +639,16 @@ class ParticleEmitter {
         this.timeSinceLastEmit += dt;
         const interval = 1 / this.config.rate;
 
+        let emitCount = 0;
         while (this.timeSinceLastEmit >= interval) {
             this.emit();
+            emitCount++;
             this.timeSinceLastEmit -= interval;
+        }
+
+        // DEBUG: Log seulement quand on émet
+        if (emitCount > 0) {
+            console.log('💨 TRAIL EMIT:', emitCount, 'particules | pos:', this.position.x.toFixed(1), this.position.y.toFixed(1), this.position.z.toFixed(1), '| Actives:', particles.length);
         }
     }
 
@@ -703,6 +712,12 @@ function createParticleBurst(x, y, z, count = 10, config = {}) {
         });
     }
 }
+
+// Exposer pour debug
+window.createParticleBurst = createParticleBurst;
+window.playerTrailEmitter = () => playerTrailEmitter;  // Fonction pour accéder à la variable
+window.particles = particles;
+window.emitters = emitters;
 
 // ========================================
 // ENNEMIS
@@ -996,6 +1011,23 @@ function loadLevel(levelName) {
         data.playerStart.z
     );
     player.velocity.set(0, 0, 0);
+
+    // Créer/recréer l'émetteur de trail du joueur
+    if (!playerTrailEmitter) {
+        console.log('🎮 Création du trail emitter du joueur...');
+        playerTrailEmitter = createEmitter(0, 0, 0, {
+            rate: 30,  // 30 particules/seconde
+            spread: 0.5,
+            active: false,  // Désactivé par défaut
+            attachTo: player.mesh,
+            offset: new THREE.Vector3(0, 0, 0),
+            particleConfig: {
+                ...PARTICLE_PRESETS.trail,
+                velocity: new THREE.Vector3(0, 0, 0)
+            }
+        });
+        console.log('✅ Trail emitter créé:', playerTrailEmitter);
+    }
 
     // Créer l'objectif
     createGoal(data.goal.x, data.goal.y, data.goal.z);
@@ -1333,9 +1365,19 @@ function handleInput(dt) {
 
     // Activer/désactiver le trail selon la vélocité
     if (playerTrailEmitter) {
+        console.log('log 1')
         const actualSpeed = Math.sqrt(player.velocity.x ** 2 + player.velocity.z ** 2);
         const isMovingFast = actualSpeed > 1; // Seuil de vitesse
-        playerTrailEmitter.config.active = isMovingFast && player.isGrounded;
+        const shouldBeActive = isMovingFast && player.isGrounded;
+
+        // Debug temporaire
+        if (shouldBeActive !== playerTrailEmitter.config.active) {
+            console.log('Trail:', shouldBeActive ? 'ACTIVÉ' : 'DÉSACTIVÉ',
+                       'Speed:', actualSpeed.toFixed(2),
+                       'Grounded:', player.isGrounded);
+        }
+
+        playerTrailEmitter.config.active = shouldBeActive;
     }
 }
 
